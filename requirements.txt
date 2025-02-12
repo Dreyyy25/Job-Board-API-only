@@ -1,0 +1,9 @@
+# Core Framework
+Django>=5.1.6
+djangorestframework>=3.15.2
+
+# Database
+psycopg2-binary>=2.9.10
+
+# Environment Variables
+python-dotenv>=1.0.1
