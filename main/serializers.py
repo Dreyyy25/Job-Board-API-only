@@ -1,10 +1,12 @@
 from rest_framework import serializers
-from .models import Job, JobApplication
-from django.contrib.auth import get_user_model
+from .models import Job, JobApplication, User
 
 class JobSerializer(serializers.ModelSerializer):
     employer = serializers.ReadOnlyField(source='employer.username')
-
+    
+    # Validations
+    status = serializers.ChoiceField(choices=['OPEN', 'CLOSED'])
+    
     class Meta:
         model = Job
         fields = ['id', 'title', 'description', 'category', 'salary_range', 
@@ -22,13 +24,13 @@ class UserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True)
 
     class Meta:
-        model = get_user_model()
+        model = User
         fields = ['id', 'email', 'username', 'password', 'first_name', 
                  'last_name', 'user_type']
         extra_kwargs = {'password': {'write_only': True}}
 
     def create(self, validated_data):
-        user = get_user_model().objects.create_user(
+        user = User.objects.create_user(
             email=validated_data['email'],
             username=validated_data['username'],
             password=validated_data['password'],
