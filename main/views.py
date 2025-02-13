@@ -3,8 +3,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.exceptions import PermissionDenied
 from django.shortcuts import get_object_or_404
-from django.contrib.auth import get_user_model
-from .models import Job, JobApplication
+from .models import Job, JobApplication, User
 from .serializers import JobSerializer, JobApplicationSerializer, UserSerializer
 from django.db.models import Q
 
@@ -23,22 +22,22 @@ class UserViewSet(viewsets.ReadOnlyModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        queryset = get_user_model().objects.none()  # Default to empty queryset
+        queryset = User.objects.none()
         user = self.request.user
-
+        
+        # Need some improvements on handling requests from different user types.
+        
         if user.user_type == 'EMPLOYER':
             # Employers can only see freelancers
-            queryset = get_user_model().objects.filter(user_type='FREELANCER')
+            queryset = User.objects.filter(user_type='FREELANCER')
         elif user.user_type == 'FREELANCER':
             # Freelancers can only see employers
-            queryset = get_user_model().objects.filter(user_type='EMPLOYER')
+            queryset = User.objects.filter(user_type='EMPLOYER')
 
-        # Apply additional filters if provided
         user_type = self.request.query_params.get('user_type', None)
         if user_type:
             queryset = queryset.filter(user_type=user_type)
 
-        # Only return basic information
         return queryset.only('id', 'username', 'user_type', 'first_name', 'last_name')
 
 class JobViewSet(viewsets.ModelViewSet):
@@ -46,6 +45,7 @@ class JobViewSet(viewsets.ModelViewSet):
     serializer_class = JobSerializer
     permission_classes = [permissions.IsAuthenticated, IsEmployerOrReadOnly]
 
+    # Search jobs by title, description, or category
     def get_queryset(self):
         queryset = Job.objects.all()
         search = self.request.query_params.get('search', None)
@@ -66,9 +66,16 @@ class JobApplicationViewSet(viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        if self.request.user.user_type == 'EMPLOYER':
-            return JobApplication.objects.filter(job__employer=self.request.user)
-        return JobApplication.objects.filter(freelancer=self.request.user)
+        user = self.request.user
+        if user.user_type not in ['EMPLOYER', 'FREELANCER']:
+            raise ValueError("User must have a valid user type")
+            
+        if user.user_type == 'EMPLOYER':
+            return JobApplication.objects.filter(job__employer=user)
+        elif user.user_type == 'FREELANCER':
+            return JobApplication.objects.filter(freelancer=user)
+        else:
+            return JobApplication.objects.none()
 
     def perform_create(self, serializer):
         job_id = self.request.data.get('job')
