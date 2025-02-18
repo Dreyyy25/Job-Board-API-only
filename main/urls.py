@@ -10,7 +10,8 @@ urlpatterns = [
         'get': 'list'
     })),
     path('users/<uuid:pk>/', views.UserViewSet.as_view({
-        'get': 'retrieve'
+        'get': 'retrieve',
+        'delete': 'destroy'
     })),
     
     # Jobs

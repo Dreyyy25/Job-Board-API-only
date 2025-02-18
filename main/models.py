@@ -8,6 +8,7 @@ class User(AbstractUser):
     USER_TYPE_CHOICES = [
         ('EMPLOYER', 'Employer'),
         ('FREELANCER', 'Freelancer'),
+        ('ADMIN', 'Admin'),
     ]
     user_type = models.CharField(max_length=10, choices=USER_TYPE_CHOICES)
     email = models.EmailField(unique=True)
