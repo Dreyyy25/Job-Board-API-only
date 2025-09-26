@@ -1,6 +1,6 @@
 {
 	"info": {
-		"_postman_id": "1a9add27-e14b-4593-8796-f2e363d0ba3f",
+		"_postman_id": "cadf7791-fcb9-4162-8905-665c0a2f4fda",
 		"name": "Job Board API",
 		"description": "Complete API collection for Job Board application with authentication, CRUD operations, and search functionality",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
@@ -154,12 +154,75 @@
 						}
 					},
 					"response": []
+				},
+				{
+					"name": "Update User",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"updated@example.com\",\n    \"date_of_birth\": \"1990-05-15\",\n    \"contact_number\": \"+1234567890\",\n    \"sex\": \"M\",\n    \"user_image_url\": \"https://example.com/profile.jpg\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}accounts/users/{{user_id}}/",
+							"host": [
+								"{{base_url}}accounts"
+							],
+							"path": [
+								"users",
+								"{{user_id}}",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Delete User",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}accounts/users/{{user_id}}/",
+							"host": [
+								"{{base_url}}accounts"
+							],
+							"path": [
+								"users",
+								"{{user_id}}",
+								""
+							]
+						}
+					},
+					"response": []
 				}
 			]
 		},
 		{
 			"name": "Job Seekers",
 			"item": [
+				{
+					"name": "Profile Management",
+					"item": []
+				},
+				{
+					"name": "Education",
+					"item": []
+				},
+				{
+					"name": "Experience",
+					"item": []
+				},
+				{
+					"name": "Skills Management",
+					"item": []
+				},
 				{
 					"name": "Get Seeker Dashboard",
 					"request": {
@@ -191,7 +254,7 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n    \"user_account\": \"{{user_id}}\",\n    \"first_name\": \"John\",\n    \"last_name\": \"Doe\",\n    \"date_of_birth\": \"1990-05-15\",\n    \"gender\": \"M\",\n    \"contact_number\": \"+1234567890\",\n    \"address\": \"123 Main St, City, State 12345\"\n}"
+							"raw": "{\n    \"user_account\": \"{{user_id}}\",\n    \"first_name\": \"John\",\n    \"last_name\": \"Doe\",\n    \"contact_details\": \"Available for interviews on weekdays\",\n    \"goals\": \"Seeking a full-time Python developer position\",\n    \"resume_url\": \"https://example.com/resume.pdf\"\n}"
 						},
 						"url": {
 							"raw": "{{base_url}}seekers/profiles/",
@@ -225,6 +288,53 @@
 					"response": []
 				},
 				{
+					"name": "Update Seeker Profile",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"user_account\": \"{{user_id}}\",\n    \"first_name\": \"John\",\n    \"last_name\": \"Doe\",\n    \"contact_details\": \"Updated contact information\",\n    \"goals\": \"Updated career goals\",\n    \"resume_url\": \"https://example.com/updated-resume.pdf\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}seekers/profiles/{{user_id}}/",
+							"host": [
+								"{{base_url}}seekers"
+							],
+							"path": [
+								"profiles",
+								"{{user_id}}",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Seeker Profile",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}seekers/profiles/{{user_id}}/",
+							"host": [
+								"{{base_url}}seekers"
+							],
+							"path": [
+								"profiles",
+								"{{user_id}}",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
 					"name": "Add Education",
 					"request": {
 						"method": "POST",
@@ -236,7 +346,7 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n    \"seeker_id\": \"{{user_id}}\",\n    \"certificate_degree_name\": \"Bachelor of Science in Computer Science\",\n    \"major\": \"Computer Science\",\n    \"institute_university_name\": \"Tech University\",\n    \"starting_date\": \"2018-09-01\",\n    \"completion_date\": \"2022-05-15\",\n    \"percentage\": 3.8,\n    \"cgpa\": 3.8\n}"
+							"raw": "{\n    \"user_account\": \"{{user_id}}\",\n    \"institute_university_name\": \"Harvard University\",\n    \"degree_type\": \"Bachelor\",\n    \"field_of_study\": \"Computer Science\",\n    \"academic_details\": \"Focus on software engineering and algorithms\",\n    \"percentage\": 85.50,\n    \"start_date\": \"2018-09-01\",\n    \"end_date\": \"2022-05-15\"\n}"
 						},
 						"url": {
 							"raw": "{{base_url}}seekers/education/",
@@ -245,6 +355,53 @@
 							],
 							"path": [
 								"education",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Education",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"user_account\": \"{{user_id}}\",\n    \"institute_university_name\": \"Updated University\",\n    \"degree_type\": \"Master\",\n    \"field_of_study\": \"Computer Science\",\n    \"academic_details\": \"Updated academic details\",\n    \"percentage\": 88.50,\n    \"start_date\": \"2018-09-01\",\n    \"end_date\": \"2022-05-15\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}seekers/education/{{education_id}}/",
+							"host": [
+								"{{base_url}}seekers"
+							],
+							"path": [
+								"education",
+								"{{education_id}}",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Education",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}seekers/education/{{education_id}}/",
+							"host": [
+								"{{base_url}}seekers"
+							],
+							"path": [
+								"education",
+								"{{education_id}}",
 								""
 							]
 						}
@@ -263,7 +420,7 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n    \"seeker_id\": \"{{user_id}}\",\n    \"job_title\": \"Software Developer\",\n    \"company_name\": \"Tech Corp\",\n    \"salary\": 75000.00,\n    \"job_location_city\": \"New York\",\n    \"job_location_state\": \"NY\",\n    \"job_location_country\": \"USA\",\n    \"starting_date\": \"2022-06-01\",\n    \"ending_date\": \"2024-01-31\",\n    \"job_description\": \"Developed web applications using Django and React\",\n    \"is_current_job\": false\n}"
+							"raw": "{\n    \"user_account\": \"{{user_id}}\",\n    \"company_name\": \"Tech Solutions Inc\",\n    \"position\": \"Junior Python Developer\",\n    \"description\": \"Developed web applications using Django framework\",\n    \"job_location_city\": \"New York\",\n    \"job_location_country\": \"USA\",\n    \"start_date\": \"2022-06-01\",\n    \"end_date\": \"2024-01-31\"\n}"
 						},
 						"url": {
 							"raw": "{{base_url}}seekers/experience/",
@@ -272,6 +429,53 @@
 							],
 							"path": [
 								"experience",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Experience",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"user_account\": \"{{user_id}}\",\n    \"company_name\": \"Updated Tech Corp\",\n    \"position\": \"Senior Python Developer\",\n    \"description\": \"Updated job description with more responsibilities\",\n    \"job_location_city\": \"San Francisco\",\n    \"job_location_country\": \"USA\",\n    \"start_date\": \"2022-06-01\",\n    \"end_date\": \"2024-01-31\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}seekers/experience/{{experience_id}}/",
+							"host": [
+								"{{base_url}}seekers"
+							],
+							"path": [
+								"experience",
+								"{{experience_id}}",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Experience",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}seekers/experience/{{experience_id}}/",
+							"host": [
+								"{{base_url}}seekers"
+							],
+							"path": [
+								"experience",
+								"{{experience_id}}",
 								""
 							]
 						}
@@ -308,7 +512,7 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n    \"skill_name\": \"Python\",\n    \"description\": \"Programming language\"\n}"
+							"raw": "{\n    \"skill_name\": \"Python\"\n}"
 						},
 						"url": {
 							"raw": "{{base_url}}seekers/skills/",
@@ -317,6 +521,34 @@
 							],
 							"path": [
 								"skills",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Skill",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"skill_name\": \"Updated Skill Name\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}seekers/skills/{{skill_id}}/",
+							"host": [
+								"{{base_url}}seekers"
+							],
+							"path": [
+								"skills",
+								"{{skill_id}}",
 								""
 							]
 						}
@@ -335,7 +567,7 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n    \"seeker_id\": \"{{user_id}}\",\n    \"skill_id\": \"skill-uuid-here\",\n    \"skill_level\": \"expert\"\n}"
+							"raw": "{\n    \"user_account\": \"{{user_id}}\",\n    \"skill_set\": \"skill-uuid-here\",\n    \"skill_level\": \"Advanced\"\n}"
 						},
 						"url": {
 							"raw": "{{base_url}}seekers/seeker-skills/",
@@ -349,12 +581,86 @@
 						}
 					},
 					"response": []
+				},
+				{
+					"name": "Update Seeker Skill",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"user_account\": \"{{user_id}}\",\n    \"skill_set\": \"skill-uuid-here\",\n    \"skill_level\": \"Expert\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}seekers/seeker-skills/{{seeker_skill_id}}/",
+							"host": [
+								"{{base_url}}seekers"
+							],
+							"path": [
+								"seeker-skills",
+								"{{seeker_skill_id}}",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Seeker Skill",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}seekers/seeker-skills/{{seeker_skill_id}}/",
+							"host": [
+								"{{base_url}}seekers"
+							],
+							"path": [
+								"seeker-skills",
+								"{{seeker_skill_id}}",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Seeker Stats",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}seekers/stats/{{user_id}}/",
+							"host": [
+								"{{base_url}}seekers"
+							],
+							"path": [
+								"stats",
+								"{{user_id}}",
+								""
+							]
+						}
+					},
+					"response": []
 				}
 			]
 		},
 		{
 			"name": "Companies",
 			"item": [
+				{
+					"name": "Company Management",
+					"item": []
+				},
+				{
+					"name": "Business Streams",
+					"item": []
+				},
 				{
 					"name": "Get Company Dashboard",
 					"request": {
@@ -404,7 +710,7 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n    \"business_stream_name\": \"Technology\",\n    \"description\": \"Software and technology companies\"\n}"
+							"raw": "{\n    \"business_stream_name\": \"Technology\"\n}"
 						},
 						"url": {
 							"raw": "{{base_url}}companies/business-streams/",
@@ -413,6 +719,34 @@
 							],
 							"path": [
 								"business-streams",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Business Stream",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"business_stream_name\": \"Updated Technology Stream\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}companies/business-streams/{{business_stream_id}}/",
+							"host": [
+								"{{base_url}}companies"
+							],
+							"path": [
+								"business-streams",
+								"{{business_stream_id}}",
 								""
 							]
 						}
@@ -447,7 +781,7 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n    \"user_account\": \"{{user_id}}\",\n    \"business_stream\": \"3b0d184d-2125-4a39-869f-a4cf705ee02a\",\n    \"company_name\": \"Tech Solutions Inc\",\n    \"profile_description\": \"Leading technology solutions provider\",\n    \"company_website_url\": \"https://techsolutions.com\",\n    \"establishment_date\": \"2010-01-15\",\n    \"company_email\": \"contact@techsolutions.com\",\n    \"contact_number\": \"+1234567890\",\n    \"company_address\": \"456 Business Ave, Tech City, TC 54321\",\n    \"employee_count\": 150\n}"
+							"raw": "{\n    \"user_account\": \"{{user_id}}\",\n    \"business_stream\": \"3b0d184d-2125-4a39-869f-a4cf705ee02a\",\n    \"company_name\": \"Tech Solutions Inc\",\n    \"profile_description\": \"Leading technology solutions provider\",\n    \"company_website_url\": \"https://techsolutions.com\",\n    \"contact_email\": \"contact@techsolutions.com\",\n    \"status\": \"active\"\n}"
 						},
 						"url": {
 							"raw": "{{base_url}}companies/companies/",
@@ -481,6 +815,53 @@
 					"response": []
 				},
 				{
+					"name": "Update Company Profile",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"user_account\": \"{{user_id}}\",\n    \"business_stream\": \"3b0d184d-2125-4a39-869f-a4cf705ee02a\",\n    \"company_name\": \"Updated Tech Solutions Inc\",\n    \"profile_description\": \"Updated company description\",\n    \"company_website_url\": \"https://updated-techsolutions.com\",\n    \"contact_email\": \"updated@techsolutions.com\",\n    \"status\": \"active\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}companies/companies/{{company_id}}/",
+							"host": [
+								"{{base_url}}companies"
+							],
+							"path": [
+								"companies",
+								"{{company_id}}",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Company Profile",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}companies/companies/{{company_id}}/",
+							"host": [
+								"{{base_url}}companies"
+							],
+							"path": [
+								"companies",
+								"{{company_id}}",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
 					"name": "Upload Company Image",
 					"request": {
 						"method": "POST",
@@ -492,7 +873,7 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n    \"company\": \"{{company_id}}\",\n    \"company_image\": \"base64-encoded-image-or-url\",\n    \"is_logo\": true\n}"
+							"raw": "{\n    \"company\": \"{{company_id}}\",\n    \"image_url\": \"https://example.com/company-logo.png\"\n}"
 						},
 						"url": {
 							"raw": "{{base_url}}companies/company-images/",
@@ -512,6 +893,31 @@
 		{
 			"name": "Jobs",
 			"item": [
+				{
+					"name": "Job Configuration",
+					"item": [
+						{
+							"name": "Job Types",
+							"item": []
+						},
+						{
+							"name": "Job Locations",
+							"item": []
+						}
+					]
+				},
+				{
+					"name": "Job Posts",
+					"item": []
+				},
+				{
+					"name": "Job Applications",
+					"item": []
+				},
+				{
+					"name": "Job Skills",
+					"item": []
+				},
 				{
 					"name": "Get Job Types",
 					"request": {
@@ -542,7 +948,7 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n    \"job_type\": \"Full-time\"\n}"
+							"raw": "{\n    \"job_type_name\": \"Full-time\",\n    \"description\": \"Full-time employment position\"\n}"
 						},
 						"url": {
 							"raw": "{{base_url}}jobs/job-types/",
@@ -551,6 +957,34 @@
 							],
 							"path": [
 								"job-types",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Job Type",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"job_type_name\": \"Updated Full-time\",\n    \"description\": \"Updated full-time employment position\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}jobs/job-types/{{job_type_id}}/",
+							"host": [
+								"{{base_url}}jobs"
+							],
+							"path": [
+								"job-types",
+								"{{job_type_id}}",
 								""
 							]
 						}
@@ -587,7 +1021,7 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n    \"street_address\": \"123 Tech St\",\n    \"city\": \"San Francisco\",\n    \"state\": \"CA\",\n    \"country\": \"USA\",\n    \"zip\": \"94105\"\n}"
+							"raw": "{\n    \"street_address\": \"123 Tech Street\",\n    \"city\": \"San Francisco\",\n    \"country\": \"USA\",\n    \"zip\": \"94105\",\n    \"country_code\": \"US\"\n}"
 						},
 						"url": {
 							"raw": "{{base_url}}jobs/job-locations/",
@@ -596,6 +1030,34 @@
 							],
 							"path": [
 								"job-locations",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Job Location",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"street_address\": \"456 Updated Tech Street\",\n    \"city\": \"New York\",\n    \"country\": \"USA\",\n    \"zip\": \"10001\",\n    \"country_code\": \"US\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}jobs/job-locations/{{job_location_id}}/",
+							"host": [
+								"{{base_url}}jobs"
+							],
+							"path": [
+								"job-locations",
+								"{{job_location_id}}",
 								""
 							]
 						}
@@ -711,6 +1173,53 @@
 					"response": []
 				},
 				{
+					"name": "Update Job Post",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"company\": \"{{company_id}}\",\n    \"job_type\": \"job-type-uuid-here\",\n    \"job_location\": \"job-location-uuid-here\",\n    \"job_title\": \"Updated Senior Python Developer\",\n    \"job_description\": \"Updated job description with new requirements and responsibilities.\",\n    \"salary_min\": 90000.00,\n    \"salary_max\": 140000.00,\n    \"salary_type\": \"yearly\",\n    \"deadline_date\": \"2024-06-30\",\n    \"is_published\": true,\n    \"is_active\": true\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}jobs/job-posts/{{job_id}}/",
+							"host": [
+								"{{base_url}}jobs"
+							],
+							"path": [
+								"job-posts",
+								"{{job_id}}",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Job Post",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}jobs/job-posts/{{job_id}}/",
+							"host": [
+								"{{base_url}}jobs"
+							],
+							"path": [
+								"job-posts",
+								"{{job_id}}",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
 					"name": "Apply for Job",
 					"request": {
 						"method": "POST",
@@ -789,7 +1298,7 @@
 						],
 						"body": {
 							"mode": "raw",
-							"raw": "{\n    \"job_post\": \"{{job_id}}\",\n    \"skill\": \"skill-uuid-here\",\n    \"skill_level\": \"expert\"\n}"
+							"raw": "{\n    \"job_post\": \"{{job_id}}\",\n    \"skill_set\": \"skill-uuid-here\",\n    \"skill_level\": \"Advanced\",\n    \"is_required\": true\n}"
 						},
 						"url": {
 							"raw": "{{base_url}}jobs/job-skills/",
@@ -798,6 +1307,53 @@
 							],
 							"path": [
 								"job-skills",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Update Job Skill Requirement",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"job_post\": \"{{job_id}}\",\n    \"skill_set\": \"skill-uuid-here\",\n    \"skill_level\": \"Expert\",\n    \"is_required\": false\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}jobs/job-skills/{{job_skill_id}}/",
+							"host": [
+								"{{base_url}}jobs"
+							],
+							"path": [
+								"job-skills",
+								"{{job_skill_id}}",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Delete Job Skill Requirement",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}jobs/job-skills/{{job_skill_id}}/",
+							"host": [
+								"{{base_url}}jobs"
+							],
+							"path": [
+								"job-skills",
+								"{{job_skill_id}}",
 								""
 							]
 						}
