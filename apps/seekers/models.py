@@ -7,7 +7,14 @@ from apps.accounts.models import UserAccount
 class SeekerProfile(models.Model):
     """Profile for job seekers with personal and academic details"""
     
-    user_account = models.OneToOneField(UserAccount, on_delete=models.CASCADE, primary_key=True, related_name='seeker_profile')
+    # Filter to only allow job_seeker-type users
+    user_account = models.OneToOneField(
+        UserAccount, 
+        on_delete=models.CASCADE, 
+        primary_key=True, 
+        related_name='seeker_profile',
+        limit_choices_to={'user_type': 'job_seeker'}
+    )
     
     first_name = models.CharField(max_length=100)
     last_name = models.CharField(max_length=100)
@@ -56,7 +63,7 @@ class ExperienceData(models.Model):
     """Work experience records for job seekers"""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user_account = models.ForeignKey(UserAccount, on_delete=models.CASCADE,related_name='experiences')
+    user_account = models.ForeignKey(UserAccount, on_delete=models.CASCADE, related_name='experiences')
     
     company_name = models.CharField(max_length=200)
     position = models.CharField(max_length=100)
@@ -78,7 +85,6 @@ class SkillSet(models.Model):
     """Master list of skills"""
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-
     skill_name = models.CharField(max_length=100, unique=True)
     created_at = models.DateTimeField(default=timezone.now)
     
@@ -96,7 +102,6 @@ class SeekerSkillSet(models.Model):
     ]
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-
     user_account = models.ForeignKey(UserAccount, on_delete=models.CASCADE, related_name='skills')
     skill_set = models.ForeignKey(SkillSet, on_delete=models.CASCADE)
     skill_level = models.CharField(max_length=20, choices=SKILL_LEVEL_CHOICES)
