@@ -27,7 +27,7 @@ POST /api/v1/accounts/register/
 **Request Body:**
 ```json
 {
-    "user_type": "550e8400-e29b-41d4-a716-446655440000",
+    "user_type": "job_seeker",
     "email": "john.doe@example.com",
     "password": "securepass123",
     "date_of_birth": "1990-05-15",
@@ -72,22 +72,6 @@ POST /api/v1/accounts/login/
 
 ## 👤 **User Management**
 
-### User Types
-```http
-GET    /api/v1/accounts/user-types/          # List all user types
-POST   /api/v1/accounts/user-types/          # Create user type
-GET    /api/v1/accounts/user-types/{id}/     # Get specific user type
-PUT    /api/v1/accounts/user-types/{id}/     # Update user type
-DELETE /api/v1/accounts/user-types/{id}/     # Delete user type
-```
-
-**Create User Type:**
-```json
-{
-    "user_type": "job_seeker"
-}
-```
-
 ### User Accounts
 ```http
 GET    /api/v1/accounts/users/               # List all users
@@ -96,6 +80,12 @@ GET    /api/v1/accounts/users/{id}/          # Get specific user
 PUT    /api/v1/accounts/users/{id}/          # Update user
 DELETE /api/v1/accounts/users/{id}/          # Delete user
 ```
+
+**User Type Options:**
+- `job_seeker`: For individuals looking for jobs
+- `company`: For businesses posting jobs
+
+**Note**: User types are now built-in choices rather than separate database records. Use the string values directly in requests.
 
 ---
 

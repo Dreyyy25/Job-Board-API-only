@@ -18,18 +18,14 @@ jobApp/
 ## Models Overview
 
 ### **Accounts App**
-#### `UserType`
-User categories for the platform
-- UUID-based primary key
-- Types: Job Seeker, Company
-- Choice field implementation
-
 #### `UserAccount` 
-Main user model with authentication
+Main user model with authentication and user type management
 - UUID-based primary key
 - Email-based authentication
-- Fields: email, password, user_type, contact_number, sex, user_image_url
+- Built-in user type choices: 'job_seeker', 'company'
+- Fields: email, password, user_type, date_of_birth, contact_number, sex, user_image_url
 - Timestamps for creation and updates
+- Simplified design using Django choices instead of separate UserType table
 
 ### **Companies App**
 #### `BusinessStream`
@@ -202,12 +198,7 @@ ALLOWED_HOSTS=localhost,127.0.0.1
    python manage.py shell
    ```
    ```python
-   # In Django shell - create user types
-   from apps.accounts.models import UserType
-   UserType.objects.create(user_type='job_seeker')
-   UserType.objects.create(user_type='company')
-   
-   # Create business streams
+   # In Django shell - create business streams
    from apps.companies.models import BusinessStream
    BusinessStream.objects.create(business_stream_name='Technology')
    BusinessStream.objects.create(business_stream_name='Healthcare')
@@ -282,7 +273,7 @@ python-dotenv==1.1.1
 ## API Features
 
 ### Core Functionality
-- **User Management**: Registration, login, profile management
+- **User Management**: Registration, login, profile management with built-in user types
 - **Company Profiles**: Business information, images, industry categorization
 - **Job Seeker Profiles**: Personal info, education, experience, skills
 - **Job Posting**: Create, search, filter job opportunities
