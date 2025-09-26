@@ -25,7 +25,12 @@ class Company(models.Model):
     ]
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user_account = models.OneToOneField(UserAccount, on_delete=models.CASCADE, related_name='company_profile')
+    user_account = models.OneToOneField(
+        UserAccount, 
+        on_delete=models.CASCADE, 
+        related_name='company_profile',
+        limit_choices_to={'user_type': 'company'}
+    )
     
     company_name = models.CharField(max_length=200)
     business_stream = models.ForeignKey(BusinessStream, on_delete=models.CASCADE)
