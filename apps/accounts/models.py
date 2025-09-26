@@ -3,25 +3,16 @@ from django.db import models
 from django.utils import timezone
 
 # Create your models here.
-# FIXME: Merge UserType into UserAccount. It is not necessary to have a separate table for user types.
-# Instead, a choice field in UserAccount would suffice.
-class UserType(models.Model):
+class UserAccount(models.Model):
     USER_TYPE_CHOICES = [
         ('job_seeker', 'Job Seeker'),
         ('company', 'Company')
     ]
-
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user_type = models.CharField(max_length=100, choices=USER_TYPE_CHOICES, unique=True, null=False, blank=False)
     
-    def __str__(self):
-        return self.user_type
-
-class UserAccount(models.Model):
     SEX_CHOICES = [('M', 'Male'), ('F', 'Female'), ('Other', 'Other')]
     
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user_type = models.ForeignKey(UserType, on_delete=models.CASCADE, null=False, blank=False)
+    user_type = models.CharField(max_length=100, choices=USER_TYPE_CHOICES, null=False, blank=False)
     email = models.EmailField(max_length=100, unique=True, null=False, blank=False)
     password = models.CharField(max_length=255, null=False, blank=False)
     date_of_birth = models.DateField(null=True, blank=True)
@@ -33,5 +24,15 @@ class UserAccount(models.Model):
     
     def __str__(self):
         return self.email
+
+    def is_authenticated(self):
+        return True
     
+    def is_anonymous(self):
+        return False
     
+    def is_active(self):
+        return True
+    
+    def get_username(self):
+        return self.email

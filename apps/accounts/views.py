@@ -2,18 +2,11 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
-from django.contrib.auth import authenticate
-from .models import UserType, UserAccount
-from .serializers import UserTypeSerializer, UserAccountSerializer
+from .models import UserAccount
+from .serializers import UserAccountSerializer
 
 # Create your views here.
-
 # ViewSets for CRUD operations
-class UserTypeViewSet(viewsets.ModelViewSet):
-    """API for managing user types"""
-    queryset = UserType.objects.all()
-    serializer_class = UserTypeSerializer
-
 class UserAccountViewSet(viewsets.ModelViewSet):
     """API for managing user accounts"""
     queryset = UserAccount.objects.all()
@@ -30,7 +23,8 @@ def register(request):
         return Response({
             'message': 'User created successfully',
             'user_id': str(user.id),
-            'email': user.email
+            'email': user.email,
+            'user_type': user.user_type
         }, status=status.HTTP_201_CREATED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -55,7 +49,7 @@ def login(request):
                 'message': 'Login successful',
                 'user_id': str(user.id),
                 'email': user.email,
-                'user_type': user.user_type.user_type
+                'user_type': user.user_type
             }, status=status.HTTP_200_OK)
         else:
             return Response({

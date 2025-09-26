@@ -1,0 +1,894 @@
+{
+	"info": {
+		"_postman_id": "1a9add27-e14b-4593-8796-f2e363d0ba3f",
+		"name": "Job Board API",
+		"description": "Complete API collection for Job Board application with authentication, CRUD operations, and search functionality",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "35168719"
+	},
+	"item": [
+		{
+			"name": "Authentication",
+			"item": [
+				{
+					"name": "Register User",
+					"request": {
+						"auth": {
+							"type": "noauth"
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"user_type\": \"company\",\n    \"email\": \"company1@example.com\",\n    \"password\": \"pass12345\",\n    \"date_of_birth\": null,\n    \"contact_number\": \"+1234567890\",\n    \"sex\": null\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}accounts/register/",
+							"host": [
+								"{{base_url}}accounts"
+							],
+							"path": [
+								"register",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Login User",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const response = pm.response.json();",
+									"    pm.collectionVariables.set('user_id', response.user_id);",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {},
+								"requests": {}
+							}
+						}
+					],
+					"request": {
+						"auth": {
+							"type": "basic",
+							"basic": [
+								{
+									"key": "password",
+									"value": "{{password}}",
+									"type": "string"
+								},
+								{
+									"key": "username",
+									"value": "{{email}}",
+									"type": "string"
+								}
+							]
+						},
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"{{email}}\",\n    \"password\": \"{{password}}\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}accounts/login/",
+							"host": [
+								"{{base_url}}accounts"
+							],
+							"path": [
+								"login",
+								""
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "User Management",
+			"item": [
+				{
+					"name": "Get All Users",
+					"request": {
+						"auth": {
+							"type": "basic",
+							"basic": [
+								{
+									"key": "username",
+									"value": "admin",
+									"type": "string"
+								},
+								{
+									"key": "password",
+									"value": "admin12345",
+									"type": "string"
+								}
+							]
+						},
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}accounts/users/",
+							"host": [
+								"{{base_url}}accounts"
+							],
+							"path": [
+								"users",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get User By ID",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}accounts/users/{{user_id}}/",
+							"host": [
+								"{{base_url}}accounts"
+							],
+							"path": [
+								"users",
+								"{{user_id}}",
+								""
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Job Seekers",
+			"item": [
+				{
+					"name": "Get Seeker Dashboard",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}seekers/dashboard/{{user_id}}/",
+							"host": [
+								"{{base_url}}seekers"
+							],
+							"path": [
+								"dashboard",
+								"{{user_id}}",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Create Seeker Profile",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"user_account\": \"{{user_id}}\",\n    \"first_name\": \"John\",\n    \"last_name\": \"Doe\",\n    \"date_of_birth\": \"1990-05-15\",\n    \"gender\": \"M\",\n    \"contact_number\": \"+1234567890\",\n    \"address\": \"123 Main St, City, State 12345\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}seekers/profiles/",
+							"host": [
+								"{{base_url}}seekers"
+							],
+							"path": [
+								"profiles",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Seeker Profiles",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}seekers/profiles/",
+							"host": [
+								"{{base_url}}seekers"
+							],
+							"path": [
+								"profiles",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Add Education",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"seeker_id\": \"{{user_id}}\",\n    \"certificate_degree_name\": \"Bachelor of Science in Computer Science\",\n    \"major\": \"Computer Science\",\n    \"institute_university_name\": \"Tech University\",\n    \"starting_date\": \"2018-09-01\",\n    \"completion_date\": \"2022-05-15\",\n    \"percentage\": 3.8,\n    \"cgpa\": 3.8\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}seekers/education/",
+							"host": [
+								"{{base_url}}seekers"
+							],
+							"path": [
+								"education",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Add Experience",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"seeker_id\": \"{{user_id}}\",\n    \"job_title\": \"Software Developer\",\n    \"company_name\": \"Tech Corp\",\n    \"salary\": 75000.00,\n    \"job_location_city\": \"New York\",\n    \"job_location_state\": \"NY\",\n    \"job_location_country\": \"USA\",\n    \"starting_date\": \"2022-06-01\",\n    \"ending_date\": \"2024-01-31\",\n    \"job_description\": \"Developed web applications using Django and React\",\n    \"is_current_job\": false\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}seekers/experience/",
+							"host": [
+								"{{base_url}}seekers"
+							],
+							"path": [
+								"experience",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get All Skills",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}seekers/skills/",
+							"host": [
+								"{{base_url}}seekers"
+							],
+							"path": [
+								"skills",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Create Skill",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"skill_name\": \"Python\",\n    \"description\": \"Programming language\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}seekers/skills/",
+							"host": [
+								"{{base_url}}seekers"
+							],
+							"path": [
+								"skills",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Add Skill to Seeker",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"seeker_id\": \"{{user_id}}\",\n    \"skill_id\": \"skill-uuid-here\",\n    \"skill_level\": \"expert\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}seekers/seeker-skills/",
+							"host": [
+								"{{base_url}}seekers"
+							],
+							"path": [
+								"seeker-skills",
+								""
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Companies",
+			"item": [
+				{
+					"name": "Get Company Dashboard",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}companies/dashboard/{{user_id}}/",
+							"host": [
+								"{{base_url}}companies"
+							],
+							"path": [
+								"dashboard",
+								"{{user_id}}",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Business Streams",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}companies/business-streams/",
+							"host": [
+								"{{base_url}}companies"
+							],
+							"path": [
+								"business-streams",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Create Business Stream",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"business_stream_name\": \"Technology\",\n    \"description\": \"Software and technology companies\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}companies/business-streams/",
+							"host": [
+								"{{base_url}}companies"
+							],
+							"path": [
+								"business-streams",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Create Company Profile",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    const response = pm.response.json();",
+									"    pm.collectionVariables.set('company_id', response.id);",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {},
+								"requests": {}
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"user_account\": \"{{user_id}}\",\n    \"business_stream\": \"3b0d184d-2125-4a39-869f-a4cf705ee02a\",\n    \"company_name\": \"Tech Solutions Inc\",\n    \"profile_description\": \"Leading technology solutions provider\",\n    \"company_website_url\": \"https://techsolutions.com\",\n    \"establishment_date\": \"2010-01-15\",\n    \"company_email\": \"contact@techsolutions.com\",\n    \"contact_number\": \"+1234567890\",\n    \"company_address\": \"456 Business Ave, Tech City, TC 54321\",\n    \"employee_count\": 150\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}companies/companies/",
+							"host": [
+								"{{base_url}}companies"
+							],
+							"path": [
+								"companies",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Companies",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}companies/companies/",
+							"host": [
+								"{{base_url}}companies"
+							],
+							"path": [
+								"companies",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Upload Company Image",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"company\": \"{{company_id}}\",\n    \"company_image\": \"base64-encoded-image-or-url\",\n    \"is_logo\": true\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}companies/company-images/",
+							"host": [
+								"{{base_url}}companies"
+							],
+							"path": [
+								"company-images",
+								""
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Jobs",
+			"item": [
+				{
+					"name": "Get Job Types",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}jobs/job-types/",
+							"host": [
+								"{{base_url}}jobs"
+							],
+							"path": [
+								"job-types",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Create Job Type",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"job_type\": \"Full-time\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}jobs/job-types/",
+							"host": [
+								"{{base_url}}jobs"
+							],
+							"path": [
+								"job-types",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Job Locations",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}jobs/job-locations/",
+							"host": [
+								"{{base_url}}jobs"
+							],
+							"path": [
+								"job-locations",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Create Job Location",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"street_address\": \"123 Tech St\",\n    \"city\": \"San Francisco\",\n    \"state\": \"CA\",\n    \"country\": \"USA\",\n    \"zip\": \"94105\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}jobs/job-locations/",
+							"host": [
+								"{{base_url}}jobs"
+							],
+							"path": [
+								"job-locations",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get All Jobs",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}jobs/job-posts/",
+							"host": [
+								"{{base_url}}jobs"
+							],
+							"path": [
+								"job-posts",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Search Jobs",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}jobs/job-posts/?search=python&city=San Francisco",
+							"host": [
+								"{{base_url}}jobs"
+							],
+							"path": [
+								"job-posts",
+								""
+							],
+							"query": [
+								{
+									"key": "search",
+									"value": "python"
+								},
+								{
+									"key": "city",
+									"value": "San Francisco"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Create Job Post",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    const response = pm.response.json();",
+									"    pm.collectionVariables.set('job_id', response.id);",
+									"}"
+								],
+								"type": "text/javascript",
+								"packages": {},
+								"requests": {}
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"company\": \"{{company_id}}\",\n    \"job_type\": \"job-type-uuid-here\",\n    \"job_location\": \"job-location-uuid-here\",\n    \"job_title\": \"Senior Python Developer\",\n    \"job_description\": \"We are looking for an experienced Python developer to join our team. The ideal candidate will have 3+ years of experience with Django, REST APIs, and PostgreSQL.\",\n    \"salary_min\": 80000.00,\n    \"salary_max\": 120000.00,\n    \"salary_type\": \"yearly\",\n    \"deadline_date\": \"2024-03-31\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}jobs/job-posts/",
+							"host": [
+								"{{base_url}}jobs"
+							],
+							"path": [
+								"job-posts",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Job By ID",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}jobs/job-posts/{{job_id}}/",
+							"host": [
+								"{{base_url}}jobs"
+							],
+							"path": [
+								"job-posts",
+								"{{job_id}}",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Apply for Job",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"user_account\": \"{{user_id}}\",\n    \"job_post\": \"{{job_id}}\",\n    \"cover_letter\": \"I am excited to apply for this position. With my 3+ years of Python and Django experience, I believe I would be a great fit for your team. I have worked on several REST API projects and have extensive experience with PostgreSQL databases.\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}jobs/apply/",
+							"host": [
+								"{{base_url}}jobs"
+							],
+							"path": [
+								"apply",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get User Applications",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}jobs/applications/user/{{user_id}}/",
+							"host": [
+								"{{base_url}}jobs"
+							],
+							"path": [
+								"applications",
+								"user",
+								"{{user_id}}",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get Job Applications",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}jobs/applications/job/{{job_id}}/",
+							"host": [
+								"{{base_url}}jobs"
+							],
+							"path": [
+								"applications",
+								"job",
+								"{{job_id}}",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Add Job Skill Requirement",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"job_post\": \"{{job_id}}\",\n    \"skill\": \"skill-uuid-here\",\n    \"skill_level\": \"expert\"\n}"
+						},
+						"url": {
+							"raw": "{{base_url}}jobs/job-skills/",
+							"host": [
+								"{{base_url}}jobs"
+							],
+							"path": [
+								"job-skills",
+								""
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Get All Job Applications",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{base_url}}jobs/job-applications/",
+							"host": [
+								"{{base_url}}jobs"
+							],
+							"path": [
+								"job-applications",
+								""
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		}
+	],
+	"auth": {
+		"type": "basic",
+		"basic": [
+			{
+				"key": "username",
+				"value": "{{email}}",
+				"type": "string"
+			},
+			{
+				"key": "password",
+				"value": "{{password}}",
+				"type": "string"
+			}
+		]
+	},
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"requests": {},
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"requests": {},
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8000/api/v1"
+		},
+		{
+			"key": "email",
+			"value": "test@example.com"
+		},
+		{
+			"key": "password",
+			"value": "testpass123"
+		},
+		{
+			"key": "user_id",
+			"value": ""
+		},
+		{
+			"key": "company_id",
+			"value": ""
+		},
+		{
+			"key": "job_id",
+			"value": ""
+		},
+		{
+			"value": ""
+		}
+	]
+}
