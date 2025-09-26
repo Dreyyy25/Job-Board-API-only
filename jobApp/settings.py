@@ -41,11 +41,14 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'accounts.apps.AccountsConfig',
     'rest_framework',
+    'apps.accounts.apps.AccountsConfig',
+    'apps.jobs',
+    'apps.seekers',
+    'apps.companies',
 ]
 
-AUTH_USER_MODEL = 'accounts.User'
+# AUTH_USER_MODEL = 'accounts.UserAccount'
 
 # DRF settings
 REST_FRAMEWORK = {
