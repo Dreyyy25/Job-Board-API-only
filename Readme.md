@@ -159,7 +159,7 @@ ALLOWED_HOSTS=localhost,127.0.0.1
    cd jobApp
    ```
 
-2. **Create virtual environment**
+2. **Create virtual environment (Recommended)**
    ```bash
    python -m venv venv
    
@@ -184,91 +184,31 @@ ALLOWED_HOSTS=localhost,127.0.0.1
 5. **Database setup**
    ```bash
    # Create database migrations
-   python manage.py makemigrations accounts
-   python manage.py makemigrations companies  
-   python manage.py makemigrations seekers
-   python manage.py makemigrations jobs
+   python manage.py makemigrations
    
    # Apply migrations
    python manage.py migrate
    ```
 
-6. **Create initial data**
-   ```bash
-   python manage.py shell
-   ```
-   ```python
-   # In Django shell - create business streams
-   from apps.companies.models import BusinessStream
-   BusinessStream.objects.create(business_stream_name='Technology')
-   BusinessStream.objects.create(business_stream_name='Healthcare')
-   BusinessStream.objects.create(business_stream_name='Finance')
-   
-   # Create job types
-   from apps.jobs.models import JobType
-   JobType.objects.create(job_type_name='Full-time', description='Full-time employment')
-   JobType.objects.create(job_type_name='Part-time', description='Part-time employment')
-   JobType.objects.create(job_type_name='Contract', description='Contract work')
-   JobType.objects.create(job_type_name='Freelance', description='Freelance work')
-   ```
-
-7. **Create superuser (optional)**
+6. **Create superuser**
    ```bash
    python manage.py createsuperuser
    ```
 
-8. **Run development server**
+7. **Run development server**
    ```bash
    python manage.py runserver
    ```
 
 The API will be available at `http://localhost:8000/api/v1/`
 
-## Testing
-
-### Using curl
-```bash
-# Test registration
-curl -X POST http://localhost:8000/api/v1/accounts/register/ \
-  -H "Content-Type: application/json" \
-  -d '{"email": "test@example.com", "password": "testpass123", "user_type": "job_seeker"}'
-
-# Test login
-curl -X POST http://localhost:8000/api/v1/accounts/login/ \
-  -H "Content-Type: application/json" \
-  -d '{"email": "test@example.com", "password": "testpass123"}'
-
-# Get job posts
-curl -X GET http://localhost:8000/api/v1/jobs/job-posts/ \
-  -H "Authorization: Basic <base64-encoded-credentials>"
-```
+You can refer the `API_DOCUMENTATION.md` for more details.
 
 ### Using Postman
 1. Import the API endpoints into Postman
 2. Set up Basic Authentication with user credentials
 3. Test CRUD operations on different endpoints
 
-## Deployment
-
-### Production Considerations
-- Set `DEBUG=False` in settings
-- Use strong `SECRET_KEY`
-- Configure proper `ALLOWED_HOSTS`
-- Set up proper database with connection pooling
-- Use environment variables for sensitive data
-- Set up proper logging
-- Configure static file serving
-- Use HTTPS in production
-
-### Dependencies
-```
-Django==5.2.5
-djangorestframework==3.16.1
-djangorestframework-simplejwt==5.5.1
-psycopg2-binary==2.9.10
-PyJWT==2.10.1
-python-dotenv==1.1.1
-```
 
 ## API Features
 
@@ -278,58 +218,3 @@ python-dotenv==1.1.1
 - **Job Seeker Profiles**: Personal info, education, experience, skills
 - **Job Posting**: Create, search, filter job opportunities
 - **Application System**: Apply for jobs, track application status
-- **Skill Matching**: Link jobs with required skills and proficiency levels
-
-### Advanced Features
-- **Search & Filtering**: Full-text search on job titles and descriptions
-- **UUID Primary Keys**: Enhanced security and scalability
-- **Comprehensive Validation**: Input sanitization and business logic validation
-- **Relationship Management**: Proper foreign key relationships between models
-- **Dashboard Endpoints**: Consolidated data views for users and companies
-- **Application Tracking**: Status management for job applications
-
-### Technical Features
-- **RESTful API Design**: Standard HTTP methods and status codes
-- **Django REST Framework**: Robust serialization and viewsets
-- **PostgreSQL Support**: Production-ready database with UUID support
-- **Authentication**: Multiple authentication methods supported
-- **Error Handling**: Comprehensive error responses with validation details
-- **Modular Architecture**: Organized in separate Django apps for maintainability
-
-## Contributing
-
-### Development Guidelines
-1. Follow PEP 8 style guidelines
-2. Write comprehensive docstrings
-3. Add unit tests for new features
-4. Use meaningful commit messages
-5. Update documentation for API changes
-
-### Code Structure
-- **Models**: Define in respective app models.py
-- **Serializers**: Handle data validation and transformation
-- **Views**: Implement business logic and API endpoints
-- **URLs**: Organize routing in app-specific urls.py files
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Support
-
-For questions or issues:
-1. Check the API documentation above
-2. Review error responses for validation details  
-3. Ensure proper authentication headers are included
-4. Verify UUID formats in requests
-
-## Version History
-
-### v1.0.0
-- Initial API implementation
-- User management system
-- Company and job seeker profiles
-- Job posting and application system
-- Basic search and filtering
-- UUID-based primary keys
-- Comprehensive validation
