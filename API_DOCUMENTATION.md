@@ -6,11 +6,17 @@ http://localhost:8000/api/v1/
 ```
 
 ## Authentication
-- **Basic Authentication** supported
-- **Session Authentication** for web clients
+- **JWT Authentication** (Primary) - Bearer token authentication
+- **Session Authentication** for web clients  
+- **Basic Authentication** (Fallback)
 - Most endpoints require authentication except registration and login
 
-**Authentication Header:**
+**JWT Authentication Header:**
+```http
+Authorization: Bearer <your-access-token>
+```
+
+**Basic Authentication Header (Fallback):**
 ```http
 Authorization: Basic <base64-encoded-credentials>
 ```
@@ -40,8 +46,15 @@ POST /api/v1/accounts/register/
 ```json
 {
     "message": "User created successfully",
-    "user_id": "123e4567-e89b-12d3-a456-426614174000",
-    "email": "john.doe@example.com"
+    "user": {
+        "id": "123e4567-e89b-12d3-a456-426614174000",
+        "email": "john.doe@example.com",
+        "user_type": "job_seeker"
+    },
+    "tokens": {
+        "refresh": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
+        "access": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
+    }
 }
 ```
 
@@ -62,11 +75,91 @@ POST /api/v1/accounts/login/
 ```json
 {
     "message": "Login successful",
-    "user_id": "123e4567-e89b-12d3-a456-426614174000",
-    "email": "john.doe@example.com",
-    "user_type": "job_seeker"
+    "user": {
+        "id": "123e4567-e89b-12d3-a456-426614174000",
+        "email": "john.doe@example.com",
+        "user_type": "job_seeker"
+    },
+    "tokens": {
+        "refresh": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
+        "access": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
+    }
 }
 ```
+
+---
+
+## 🎟️ **JWT Token Management**
+
+### Refresh Access Token
+```http
+POST /api/v1/accounts/token/refresh/
+```
+
+**Request Body:**
+```json
+{
+    "refresh": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
+}
+```
+
+**Response (200 OK):**
+```json
+{
+    "access": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
+}
+```
+
+### Verify Token
+```http
+POST /api/v1/accounts/token/verify/
+```
+
+**Request Body:**
+```json
+{
+    "token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
+}
+```
+
+**Response (200 OK):** Empty response if token is valid
+
+### Logout (Blacklist Token)
+```http
+POST /api/v1/accounts/token/blacklist/
+```
+
+**Request Headers:**
+```http
+Authorization: Bearer <your-access-token>
+```
+
+**Request Body:**
+```json
+{
+    "refresh": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
+}
+```
+
+**Response (200 OK):** Empty response on successful logout
+
+---
+
+## ⏰ **JWT Token Lifecycle**
+
+### Token Expiration
+- **Access Token**: 60 minutes
+- **Refresh Token**: 7 days
+- **Token Rotation**: Enabled (refresh tokens are rotated on refresh)
+- **Blacklisting**: Tokens are blacklisted after logout
+
+### Token Claims
+JWT tokens include the following claims:
+- `user_id`: User's UUID
+- `email`: User's email address
+- `user_type`: Either "job_seeker" or "company"
+- `exp`: Token expiration time
+- `iat`: Token issued at time
 
 ---
 
@@ -467,17 +560,26 @@ curl -X POST http://localhost:8000/api/v1/accounts/login/ \
   }'
 ```
 
-**Search jobs:**
+**Refresh token:**
 ```bash
-curl -X GET "http://localhost:8000/api/v1/jobs/job-posts/?search=python&city=New York" \
-  -H "Authorization: Basic <base64-encoded-credentials>"
+curl -X POST http://localhost:8000/api/v1/accounts/token/refresh/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "refresh": "your-refresh-token-here"
+  }'
 ```
 
-**Apply for a job:**
+**Search jobs (with JWT):**
+```bash
+curl -X GET "http://localhost:8000/api/v1/jobs/job-posts/?search=python&city=New York" \
+  -H "Authorization: Bearer <your-access-token>"
+```
+
+**Apply for a job (with JWT):**
 ```bash
 curl -X POST http://localhost:8000/api/v1/jobs/apply/ \
   -H "Content-Type: application/json" \
-  -H "Authorization: Basic <base64-encoded-credentials>" \
+  -H "Authorization: Bearer <your-access-token>" \
   -d '{
     "user_account": "user-uuid-here",
     "job_post": "job-uuid-here",
@@ -485,45 +587,80 @@ curl -X POST http://localhost:8000/api/v1/jobs/apply/ \
   }'
 ```
 
+**Logout (blacklist token):**
+```bash
+curl -X POST http://localhost:8000/api/v1/accounts/token/blacklist/ \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <your-access-token>" \
+  -d '{
+    "refresh": "your-refresh-token-here"
+  }'
+```
+
 ### Using Python requests
 
 ```python
 import requests
-import base64
 
 # Base URL
 BASE_URL = "http://localhost:8000/api/v1"
 
-# Authentication
-def get_auth_header(email, password):
-    credentials = base64.b64encode(f"{email}:{password}".encode()).decode()
-    return {"Authorization": f"Basic {credentials}"}
+# JWT Authentication helper
+def get_jwt_header(access_token):
+    return {"Authorization": f"Bearer {access_token}"}
 
-# Register user
-response = requests.post(f"{BASE_URL}/accounts/register/", json={
+# Register user (returns JWT tokens)
+register_response = requests.post(f"{BASE_URL}/accounts/register/", json={
     "email": "john@example.com",
     "password": "password123",
     "user_type": "job_seeker"
 })
 
-# Login and get user info
+if register_response.status_code == 201:
+    tokens = register_response.json()["tokens"]
+    access_token = tokens["access"]
+    refresh_token = tokens["refresh"]
+    print("Registration successful!")
+
+# Login (returns JWT tokens)
 login_response = requests.post(f"{BASE_URL}/accounts/login/", json={
-    "email": "john@example.com",
+    "email": "john@example.com", 
     "password": "password123"
 })
 
-# Search jobs (authenticated)
-headers = get_auth_header("john@example.com", "password123")
+if login_response.status_code == 200:
+    login_data = login_response.json()
+    access_token = login_data["tokens"]["access"]
+    refresh_token = login_data["tokens"]["refresh"]
+    user_id = login_data["user"]["id"]
+
+# Search jobs (JWT authenticated)
+headers = get_jwt_header(access_token)
 jobs = requests.get(f"{BASE_URL}/jobs/job-posts/?search=python", headers=headers)
 
-# Apply for job
+# Apply for job (JWT authenticated)
 application = requests.post(f"{BASE_URL}/jobs/apply/", 
     headers=headers,
     json={
-        "user_account": "user-uuid",
+        "user_account": user_id,
         "job_post": "job-uuid",
         "cover_letter": "I'm interested in this position"
     }
+)
+
+# Refresh token when access token expires
+refresh_response = requests.post(f"{BASE_URL}/accounts/token/refresh/", json={
+    "refresh": refresh_token
+})
+
+if refresh_response.status_code == 200:
+    new_access_token = refresh_response.json()["access"]
+    headers = get_jwt_header(new_access_token)
+
+# Logout (blacklist refresh token)
+logout_response = requests.post(f"{BASE_URL}/accounts/token/blacklist/", 
+    headers=headers,
+    json={"refresh": refresh_token}
 )
 ```
 
