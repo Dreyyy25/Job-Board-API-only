@@ -17,8 +17,12 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 
+from jobApp import settings
+
+admin_url = 'secure-admin/' if settings.DEBUG else 'admin-secure/'
+
 urlpatterns = [
-    path('admin/', admin.site.urls),
+    path(admin_url, admin.site.urls),
     path('api/v1/accounts/', include('apps.accounts.urls')),
     path('api/v1/jobs/', include('apps.jobs.urls')),
     path('api/v1/seekers/', include('apps.seekers.urls')),
