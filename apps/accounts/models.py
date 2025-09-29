@@ -1,6 +1,7 @@
 import uuid
 from django.db import models
 from django.utils import timezone
+from django.contrib.auth.hashers import make_password
 
 # Create your models here.
 class UserAccount(models.Model):
@@ -21,18 +22,31 @@ class UserAccount(models.Model):
     user_image_url = models.URLField(max_length=500, blank=True)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
+    last_login = models.DateTimeField(null=True, blank=True)
     
     def __str__(self):
         return self.email
 
+    @property
     def is_authenticated(self):
         return True
     
+    @property
     def is_anonymous(self):
         return False
     
+    @property
     def is_active(self):
         return True
     
     def get_username(self):
         return self.email
+    
+    def set_password(self, raw_password):
+        """Hash and set password"""
+        self.password = make_password(raw_password)
+    
+    def check_password(self, raw_password):
+        """Check if provided password matches the stored password"""
+        from django.contrib.auth.hashers import check_password
+        return check_password(raw_password, self.password)
