@@ -51,15 +51,14 @@ INSTALLED_APPS = [
     'apps.companies',
 ]
 
-# AUTH_USER_MODEL = 'accounts.UserAccount'
+AUTH_USER_MODEL = 'accounts.UserAccount'
 
 
 # DRF settings
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework_simplejwt.authentication.JWTAuthentication',
+        'apps.accounts.authentication.CustomJWTAuthentication',
         'rest_framework.authentication.SessionAuthentication',
-        'apps.accounts.authentication.EmailBasicAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
