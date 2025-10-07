@@ -4,6 +4,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated, BasePermission
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth.hashers import make_password, check_password
+from django.utils import timezone
 
 from .models import UserAccount
 from .serializers import UserAccountSerializer
@@ -111,6 +112,9 @@ def login(request):
     try:
         user = UserAccount.objects.get(email=email)
         if check_password(password, user.password):
+            user.last_login = timezone.now()
+            user.save(update_fields=['last_login'])
+
             # Use built-in RefreshToken.for_user()
             refresh = RefreshToken.for_user(user)
             refresh['user_id'] = str(user.id)
