@@ -1,6 +1,6 @@
 {
 	"info": {
-		"_postman_id": "cadf7791-fcb9-4162-8905-665c0a2f4fda",
+		"_postman_id": "589e6ef8-77f0-4561-b2e4-bac73000fcec",
 		"name": "Job Board API",
 		"description": "Complete API collection for Job Board application with authentication, CRUD operations, and search functionality",
 		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
@@ -8,1443 +8,3448 @@
 	},
 	"item": [
 		{
-			"name": "Authentication",
+			"name": "Accounts API",
 			"item": [
 				{
-					"name": "Register User",
-					"request": {
-						"auth": {
-							"type": "noauth"
-						},
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"user_type\": \"company\",\n    \"email\": \"company1@example.com\",\n    \"password\": \"pass12345\",\n    \"date_of_birth\": null,\n    \"contact_number\": \"+1234567890\",\n    \"sex\": null\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}accounts/register/",
-							"host": [
-								"{{base_url}}accounts"
-							],
-							"path": [
-								"register",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Login User",
-					"event": [
+					"name": "Authentication",
+					"item": [
 						{
-							"listen": "test",
-							"script": {
-								"exec": [
-									"if (pm.response.code === 200) {",
-									"    const response = pm.response.json();",
-									"    pm.collectionVariables.set('user_id', response.user_id);",
-									"}"
+							"name": "Register User",
+							"request": {
+								"auth": {
+									"type": "noauth"
+								},
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
 								],
-								"type": "text/javascript",
-								"packages": {},
-								"requests": {}
-							}
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"user_type\": \"job_seeker\", //company | job_seeker\n    \"email\": \"job_seeker1@example.com\",\n    \"password\": \"pass12345\",\n    \"date_of_birth\": \"2000-01-01\",\n    \"contact_number\": \"+1234567890\",\n    \"sex\": \"M\"\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{base_url}}/accounts/register/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"accounts",
+										"register",
+										""
+									]
+								},
+								"description": "Register a new user account. **User types:** `job_seeker` or `company`"
+							},
+							"response": []
+						},
+						{
+							"name": "Login User",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											""
+										],
+										"type": "text/javascript",
+										"packages": {},
+										"requests": {}
+									}
+								}
+							],
+							"request": {
+								"auth": {
+									"type": "noauth"
+								},
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"email\": \"job_seeker1@example.com\",\n    \"password\": \"pass12345\"\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{base_url}}/accounts/login/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"accounts",
+										"login",
+										""
+									]
+								},
+								"description": "Authenticate user and receive JWT access & refresh tokens"
+							},
+							"response": []
+						},
+						{
+							"name": "Get Current User",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/accounts/me/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"accounts",
+										"me",
+										""
+									]
+								},
+								"description": "Get authenticated user's account information"
+							},
+							"response": []
 						}
 					],
-					"request": {
-						"auth": {
-							"type": "basic",
-							"basic": [
+					"description": "Endpoints for user authentication and JWT token management"
+				},
+				{
+					"name": "Token Management",
+					"item": [
+						{
+							"name": "Refresh Access Token",
+							"event": [
 								{
-									"key": "password",
-									"value": "{{password}}",
-									"type": "string"
-								},
-								{
-									"key": "username",
-									"value": "{{email}}",
-									"type": "string"
+									"listen": "test",
+									"script": {
+										"exec": [
+											"if (pm.response.code === 200) {",
+											"    const response = pm.response.json();",
+											"    pm.collectionVariables.set('access_token', response.access);",
+											"    console.log('✅ New access token saved');",
+											"}"
+										],
+										"type": "text/javascript"
+									}
 								}
-							]
-						},
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"email\": \"{{email}}\",\n    \"password\": \"{{password}}\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}accounts/login/",
-							"host": [
-								"{{base_url}}accounts"
 							],
-							"path": [
-								"login",
-								""
-							]
+							"request": {
+								"auth": {
+									"type": "noauth"
+								},
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"refresh\": \"{{refresh_token}}\"\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{base_url}}/accounts/token/refresh/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"accounts",
+										"token",
+										"refresh",
+										""
+									]
+								},
+								"description": "Generate a new access token using refresh token"
+							},
+							"response": []
+						},
+						{
+							"name": "Verify Token",
+							"request": {
+								"auth": {
+									"type": "noauth"
+								},
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"token\": \"{{access_token}}\"\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{base_url}}/accounts/token/verify/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"accounts",
+										"token",
+										"verify",
+										""
+									]
+								},
+								"description": "Verify if the access token is valid"
+							},
+							"response": []
 						}
-					},
-					"response": []
+					],
+					"description": "JWT token refresh and verification endpoints"
+				},
+				{
+					"name": "User Management",
+					"item": [
+						{
+							"name": "List All Users",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/accounts/users/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"accounts",
+										"users",
+										""
+									]
+								},
+								"description": "Get list of all users (admin access required or own account)"
+							},
+							"response": []
+						},
+						{
+							"name": "Get User By ID",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/accounts/users/{{user_id}}/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"accounts",
+										"users",
+										"{{user_id}}",
+										""
+									]
+								},
+								"description": "Get specific user details by UUID"
+							},
+							"response": []
+						},
+						{
+							"name": "Update User (Full)",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "PUT",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"email\": \"updated@example.com\",\n    \"date_of_birth\": \"1992-03-20\",\n    \"contact_number\": \"+1987654321\",\n    \"sex\": \"F\",\n    \"user_image_url\": \"https://example.com/profile-updated.jpg\"\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{base_url}}/accounts/users/{{user_id}}/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"accounts",
+										"users",
+										"{{user_id}}",
+										""
+									]
+								},
+								"description": "Full update of user account (all fields required)"
+							},
+							"response": []
+						},
+						{
+							"name": "Update User (Partial)",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "PATCH",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"contact_number\": \"+1555123456\",\n    \"user_image_url\": \"https://example.com/new-profile.jpg\"\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{base_url}}/accounts/users/{{user_id}}/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"accounts",
+										"users",
+										"{{user_id}}",
+										""
+									]
+								},
+								"description": "Partial update of user account (only specified fields)"
+							},
+							"response": []
+						},
+						{
+							"name": "Delete User",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "DELETE",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/accounts/users/{{user_id}}/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"accounts",
+										"users",
+										"{{user_id}}",
+										""
+									]
+								},
+								"description": "Delete user account (own account or admin only)"
+							},
+							"response": []
+						}
+					],
+					"description": "CRUD operations for user accounts"
 				}
 			]
 		},
 		{
-			"name": "User Management",
+			"name": "Seekers API",
 			"item": [
 				{
-					"name": "Get All Users",
-					"request": {
-						"auth": {
-							"type": "basic",
-							"basic": [
+					"name": "Seeker Profiles",
+					"item": [
+						{
+							"name": "Profile CRUD",
+							"item": [
 								{
-									"key": "username",
-									"value": "admin",
-									"type": "string"
+									"name": "List All Profiles",
+									"request": {
+										"auth": {
+											"type": "bearer",
+											"bearer": [
+												{
+													"key": "token",
+													"value": "{{access_token}}",
+													"type": "string"
+												}
+											]
+										},
+										"method": "GET",
+										"header": [],
+										"url": {
+											"raw": "{{base_url}}/seekers/seeker-profiles/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"seekers",
+												"seeker-profiles",
+												""
+											]
+										},
+										"description": "Get all seeker profiles (authenticated users). Users see only their own profile; Admins see all."
+									},
+									"response": []
 								},
 								{
-									"key": "password",
-									"value": "admin12345",
-									"type": "string"
+									"name": "Get Profile By ID",
+									"request": {
+										"auth": {
+											"type": "bearer",
+											"bearer": [
+												{
+													"key": "token",
+													"value": "{{access_token}}",
+													"type": "string"
+												}
+											]
+										},
+										"method": "GET",
+										"header": [],
+										"url": {
+											"raw": "{{base_url}}/seekers/seeker-profiles/{{profile_id}}/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"seekers",
+												"seeker-profiles",
+												"{{profile_id}}",
+												""
+											]
+										},
+										"description": "Get specific seeker profile"
+									},
+									"response": []
+								},
+								{
+									"name": "Create Profile",
+									"event": [
+										{
+											"listen": "test",
+											"script": {
+												"exec": [
+													"if (pm.response.code === 201) {",
+													"    const response = pm.response.json();",
+													"    pm.collectionVariables.set('profile_id', response.id);",
+													"    console.log('✅ Profile ID saved:', response.id);",
+													"}"
+												],
+												"type": "text/javascript"
+											}
+										}
+									],
+									"request": {
+										"auth": {
+											"type": "bearer",
+											"bearer": [
+												{
+													"key": "token",
+													"value": "{{access_token}}",
+													"type": "string"
+												}
+											]
+										},
+										"method": "POST",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											}
+										],
+										"body": {
+											"mode": "raw",
+											"raw": "{\n    \"user_account\": \"{{user_id}}\",\n    \"first_name\": \"Jane\",\n    \"last_name\": \"Smith\",\n    \"date_of_birth\": \"1995-03-15\",\n    \"gender\": \"Female\",\n    \"bio\": \"Passionate software engineer with 5 years of experience in full-stack development. Specialized in Python, Django, React, and cloud technologies. Strong problem-solving skills and team collaboration.\",\n    \"contact_number\": \"+1-555-0123\"\n}",
+											"options": {
+												"raw": {
+													"language": "json"
+												}
+											}
+										},
+										"url": {
+											"raw": "{{base_url}}/seekers/seeker-profiles/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"seekers",
+												"seeker-profiles",
+												""
+											]
+										},
+										"description": "Create seeker profile. User account auto-assigned from authenticated user."
+									},
+									"response": []
+								},
+								{
+									"name": "Update Profile (Full)",
+									"request": {
+										"auth": {
+											"type": "bearer",
+											"bearer": [
+												{
+													"key": "token",
+													"value": "{{access_token}}",
+													"type": "string"
+												}
+											]
+										},
+										"method": "PUT",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											}
+										],
+										"body": {
+											"mode": "raw",
+											"raw": "{\n    \"user_account\": \"{{user_id}}\",\n    \"first_name\": \"Jane\",\n    \"last_name\": \"Smith-Johnson\",\n    \"date_of_birth\": \"1995-03-15\",\n    \"gender\": \"Female\",\n    \"bio\": \"Senior Full-Stack Engineer with 6 years of experience building scalable web applications. Expertise in Python (Django, FastAPI), JavaScript (React, Node.js), PostgreSQL, Docker, and AWS. Proven track record of leading projects from conception to production. Passionate about clean code, mentoring, and continuous learning.\",\n    \"contact_number\": \"+1-555-0123\"\n}",
+											"options": {
+												"raw": {
+													"language": "json"
+												}
+											}
+										},
+										"url": {
+											"raw": "{{base_url}}/seekers/seeker-profiles/{{profile_id}}/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"seekers",
+												"seeker-profiles",
+												"{{profile_id}}",
+												""
+											]
+										},
+										"description": "Full update of seeker profile (Owner or Admin)"
+									},
+									"response": []
+								},
+								{
+									"name": "Update Profile (Partial)",
+									"request": {
+										"auth": {
+											"type": "bearer",
+											"bearer": [
+												{
+													"key": "token",
+													"value": "{{access_token}}",
+													"type": "string"
+												}
+											]
+										},
+										"method": "PATCH",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											}
+										],
+										"body": {
+											"mode": "raw",
+											"raw": "{\n    \"contact_number\": \"+1-555-9999\",\n    \"bio\": \"Updated professional summary with new achievements and certifications.\"\n}",
+											"options": {
+												"raw": {
+													"language": "json"
+												}
+											}
+										},
+										"url": {
+											"raw": "{{base_url}}/seekers/seeker-profiles/{{profile_id}}/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"seekers",
+												"seeker-profiles",
+												"{{profile_id}}",
+												""
+											]
+										},
+										"description": "Partial update of profile fields"
+									},
+									"response": []
+								},
+								{
+									"name": "Delete Profile",
+									"request": {
+										"auth": {
+											"type": "bearer",
+											"bearer": [
+												{
+													"key": "token",
+													"value": "{{access_token}}",
+													"type": "string"
+												}
+											]
+										},
+										"method": "DELETE",
+										"header": [],
+										"url": {
+											"raw": "{{base_url}}/seekers/seeker-profiles/{{profile_id}}/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"seekers",
+												"seeker-profiles",
+												"{{profile_id}}",
+												""
+											]
+										},
+										"description": "Delete seeker profile (Owner or Admin)"
+									},
+									"response": []
 								}
-							]
+							],
+							"description": "Core endpoints for creating, retrieving, updating, and deleting seeker profile data. These APIs handle the fundamental CRUD operations for job seeker profiles."
 						},
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}accounts/users/",
-							"host": [
-								"{{base_url}}accounts"
+						{
+							"name": "Dashboard",
+							"item": [
+								{
+									"name": "Get Seeker Dashboard",
+									"request": {
+										"auth": {
+											"type": "bearer",
+											"bearer": [
+												{
+													"key": "token",
+													"value": "{{access_token}}",
+													"type": "string"
+												}
+											]
+										},
+										"method": "GET",
+										"header": [],
+										"url": {
+											"raw": "{{base_url}}/seekers/seeker-profiles/{{profile_id}}/dashboard/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"seekers",
+												"seeker-profiles",
+												"{{profile_id}}",
+												"dashboard",
+												""
+											]
+										},
+										"description": "Get comprehensive dashboard data including profile, education, experience, skills, and applications (Profile owner only)"
+									},
+									"response": []
+								}
 							],
-							"path": [
-								"users",
-								""
-							]
+							"description": "Endpoints for retrieving and managing job seeker dashboard data. These APIs provide aggregated information and metrics for job seekers to track their application status, profile views, and other relevant statistics."
 						}
-					},
-					"response": []
-				},
-				{
-					"name": "Get User By ID",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}accounts/users/{{user_id}}/",
-							"host": [
-								"{{base_url}}accounts"
-							],
-							"path": [
-								"users",
-								"{{user_id}}",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Update User",
-					"request": {
-						"method": "PUT",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"email\": \"updated@example.com\",\n    \"date_of_birth\": \"1990-05-15\",\n    \"contact_number\": \"+1234567890\",\n    \"sex\": \"M\",\n    \"user_image_url\": \"https://example.com/profile.jpg\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}accounts/users/{{user_id}}/",
-							"host": [
-								"{{base_url}}accounts"
-							],
-							"path": [
-								"users",
-								"{{user_id}}",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Delete User",
-					"request": {
-						"method": "DELETE",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}accounts/users/{{user_id}}/",
-							"host": [
-								"{{base_url}}accounts"
-							],
-							"path": [
-								"users",
-								"{{user_id}}",
-								""
-							]
-						}
-					},
-					"response": []
-				}
-			]
-		},
-		{
-			"name": "Job Seekers",
-			"item": [
-				{
-					"name": "Profile Management",
-					"item": []
+					],
+					"description": "Endpoints for creating, retrieving, updating, and deleting job seeker profile information. These APIs manage core profile data including personal details, contact information, and profile visibility settings."
 				},
 				{
 					"name": "Education",
-					"item": []
+					"item": [
+						{
+							"name": "List Education Records",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/seekers/education-details/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"seekers",
+										"education-details",
+										""
+									]
+								},
+								"description": "Get all education records for authenticated user"
+							},
+							"response": []
+						},
+						{
+							"name": "Get Education Record",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/seekers/education-details/{{education_id}}/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"seekers",
+										"education-details",
+										"{{education_id}}",
+										""
+									]
+								},
+								"description": "Get specific education record"
+							},
+							"response": []
+						},
+						{
+							"name": "Add Education",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"if (pm.response.code === 201) {",
+											"    const response = pm.response.json();",
+											"    pm.collectionVariables.set('education_id', response.id);",
+											"    console.log('✅ Education ID saved:', response.id);",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"seeker_profile\": \"{{profile_id}}\",\n    \"major\": \"Computer Science\",\n    \"university_name\": \"Stanford University\",\n    \"starting_date\": \"2013-09-01\",\n    \"completion_date\": \"2017-06-15\",\n    \"degree_type\": \"Bachelor's Degree\",\n    \"gpa\": 3.8,\n    \"description\": \"Focus on software engineering, algorithms, and distributed systems. Dean's List all semesters. Senior project: Building a scalable microservices platform.\"\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{base_url}}/seekers/education-details/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"seekers",
+										"education-details",
+										""
+									]
+								},
+								"description": "Add education record to profile. **Degree Types:** High School, Associate's, Bachelor's, Master's, Doctorate, Certificate, Bootcamp"
+							},
+							"response": []
+						},
+						{
+							"name": "Update Education",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "PUT",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"seeker_profile\": \"{{profile_id}}\",\n    \"major\": \"Computer Science with AI Specialization\",\n    \"university_name\": \"Stanford University\",\n    \"starting_date\": \"2013-09-01\",\n    \"completion_date\": \"2017-06-15\",\n    \"degree_type\": \"Bachelor's Degree\",\n    \"gpa\": 3.85,\n    \"description\": \"Specialized in AI and Machine Learning. Senior project: Developed a neural network-based recommendation system. Dean's List all semesters.\"\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{base_url}}/seekers/education-details/{{education_id}}/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"seekers",
+										"education-details",
+										"{{education_id}}",
+										""
+									]
+								},
+								"description": "Update education record (Owner or Admin)"
+							},
+							"response": []
+						},
+						{
+							"name": "Delete Education",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "DELETE",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/seekers/education-details/{{education_id}}/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"seekers",
+										"education-details",
+										"{{education_id}}",
+										""
+									]
+								},
+								"description": "Delete education record (Owner or Admin)"
+							},
+							"response": []
+						}
+					],
+					"description": "Endpoints for managing job seeker educational background information. Includes APIs for adding, retrieving, updating, and deleting education records such as degrees, institutions, fields of study, and graduation dates."
 				},
 				{
 					"name": "Experience",
-					"item": []
+					"item": [
+						{
+							"name": "List Experience Records",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/seekers/experience-details/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"seekers",
+										"experience-details",
+										""
+									]
+								},
+								"description": "Get all experience records for authenticated user"
+							},
+							"response": []
+						},
+						{
+							"name": "Get Experience Record",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/seekers/experience-details/{{experience_id}}/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"seekers",
+										"experience-details",
+										"{{experience_id}}",
+										""
+									]
+								},
+								"description": "Get specific experience record"
+							},
+							"response": []
+						},
+						{
+							"name": "Add Experience",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"if (pm.response.code === 201) {",
+											"    const response = pm.response.json();",
+											"    pm.collectionVariables.set('experience_id', response.id);",
+											"    console.log('✅ Experience ID saved:', response.id);",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"seeker_profile\": \"{{profile_id}}\",\n    \"job_title\": \"Senior Python Developer\",\n    \"company_name\": \"Tech Innovations Inc.\",\n    \"starting_date\": \"2020-01-15\",\n    \"completion_date\": null,\n    \"is_current_job\": true,\n    \"description\": \"Leading development of RESTful APIs using Django and Django REST Framework. Architecting microservices with Docker and Kubernetes. Mentoring junior developers and conducting code reviews. Technologies: Python, Django, PostgreSQL, Redis, Docker, AWS, CI/CD.\"\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{base_url}}/seekers/experience-details/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"seekers",
+										"experience-details",
+										""
+									]
+								},
+								"description": "Add work experience. Set completion_date to null and is_current_job to true for current positions."
+							},
+							"response": []
+						},
+						{
+							"name": "Update Experience",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "PUT",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"seeker_profile\": \"{{profile_id}}\",\n    \"job_title\": \"Lead Python Developer\",\n    \"company_name\": \"Tech Innovations Inc.\",\n    \"starting_date\": \"2020-01-15\",\n    \"completion_date\": null,\n    \"is_current_job\": true,\n    \"description\": \"Promoted to Lead Developer. Architecting scalable microservices platform handling 10M+ daily requests. Leading team of 5 engineers. Key achievements: Reduced API response time by 40%, implemented CI/CD pipeline, migrated monolith to microservices. Tech stack: Python, Django, FastAPI, PostgreSQL, Redis, Docker, Kubernetes, AWS.\"\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{base_url}}/seekers/experience-details/{{experience_id}}/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"seekers",
+										"experience-details",
+										"{{experience_id}}",
+										""
+									]
+								},
+								"description": "Update experience record (Owner or Admin)"
+							},
+							"response": []
+						},
+						{
+							"name": "Mark Experience as Completed",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "PATCH",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"completion_date\": \"2025-01-31\",\n    \"is_current_job\": false\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{base_url}}/seekers/experience-details/{{experience_id}}/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"seekers",
+										"experience-details",
+										"{{experience_id}}",
+										""
+									]
+								},
+								"description": "Mark job as completed (no longer current)"
+							},
+							"response": []
+						},
+						{
+							"name": "Delete Experience",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "DELETE",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/seekers/experience-details/{{experience_id}}/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"seekers",
+										"experience-details",
+										"{{experience_id}}",
+										""
+									]
+								},
+								"description": "Delete experience record (Owner or Admin)"
+							},
+							"response": []
+						}
+					],
+					"description": "Endpoints for managing job seeker work experience records. These APIs handle the creation, retrieval, updating, and deletion of employment history including job titles, companies, dates, and responsibilities."
 				},
 				{
 					"name": "Skills Management",
-					"item": []
-				},
-				{
-					"name": "Get Seeker Dashboard",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}seekers/dashboard/{{user_id}}/",
-							"host": [
-								"{{base_url}}seekers"
-							],
-							"path": [
-								"dashboard",
-								"{{user_id}}",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Create Seeker Profile",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"user_account\": \"{{user_id}}\",\n    \"first_name\": \"John\",\n    \"last_name\": \"Doe\",\n    \"contact_details\": \"Available for interviews on weekdays\",\n    \"goals\": \"Seeking a full-time Python developer position\",\n    \"resume_url\": \"https://example.com/resume.pdf\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}seekers/profiles/",
-							"host": [
-								"{{base_url}}seekers"
-							],
-							"path": [
-								"profiles",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Get Seeker Profiles",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}seekers/profiles/",
-							"host": [
-								"{{base_url}}seekers"
-							],
-							"path": [
-								"profiles",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Update Seeker Profile",
-					"request": {
-						"method": "PUT",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"user_account\": \"{{user_id}}\",\n    \"first_name\": \"John\",\n    \"last_name\": \"Doe\",\n    \"contact_details\": \"Updated contact information\",\n    \"goals\": \"Updated career goals\",\n    \"resume_url\": \"https://example.com/updated-resume.pdf\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}seekers/profiles/{{user_id}}/",
-							"host": [
-								"{{base_url}}seekers"
-							],
-							"path": [
-								"profiles",
-								"{{user_id}}",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Delete Seeker Profile",
-					"request": {
-						"method": "DELETE",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}seekers/profiles/{{user_id}}/",
-							"host": [
-								"{{base_url}}seekers"
-							],
-							"path": [
-								"profiles",
-								"{{user_id}}",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Add Education",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"user_account\": \"{{user_id}}\",\n    \"institute_university_name\": \"Harvard University\",\n    \"degree_type\": \"Bachelor\",\n    \"field_of_study\": \"Computer Science\",\n    \"academic_details\": \"Focus on software engineering and algorithms\",\n    \"percentage\": 85.50,\n    \"start_date\": \"2018-09-01\",\n    \"end_date\": \"2022-05-15\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}seekers/education/",
-							"host": [
-								"{{base_url}}seekers"
-							],
-							"path": [
-								"education",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Update Education",
-					"request": {
-						"method": "PUT",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"user_account\": \"{{user_id}}\",\n    \"institute_university_name\": \"Updated University\",\n    \"degree_type\": \"Master\",\n    \"field_of_study\": \"Computer Science\",\n    \"academic_details\": \"Updated academic details\",\n    \"percentage\": 88.50,\n    \"start_date\": \"2018-09-01\",\n    \"end_date\": \"2022-05-15\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}seekers/education/{{education_id}}/",
-							"host": [
-								"{{base_url}}seekers"
-							],
-							"path": [
-								"education",
-								"{{education_id}}",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Delete Education",
-					"request": {
-						"method": "DELETE",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}seekers/education/{{education_id}}/",
-							"host": [
-								"{{base_url}}seekers"
-							],
-							"path": [
-								"education",
-								"{{education_id}}",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Add Experience",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"user_account\": \"{{user_id}}\",\n    \"company_name\": \"Tech Solutions Inc\",\n    \"position\": \"Junior Python Developer\",\n    \"description\": \"Developed web applications using Django framework\",\n    \"job_location_city\": \"New York\",\n    \"job_location_country\": \"USA\",\n    \"start_date\": \"2022-06-01\",\n    \"end_date\": \"2024-01-31\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}seekers/experience/",
-							"host": [
-								"{{base_url}}seekers"
-							],
-							"path": [
-								"experience",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Update Experience",
-					"request": {
-						"method": "PUT",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"user_account\": \"{{user_id}}\",\n    \"company_name\": \"Updated Tech Corp\",\n    \"position\": \"Senior Python Developer\",\n    \"description\": \"Updated job description with more responsibilities\",\n    \"job_location_city\": \"San Francisco\",\n    \"job_location_country\": \"USA\",\n    \"start_date\": \"2022-06-01\",\n    \"end_date\": \"2024-01-31\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}seekers/experience/{{experience_id}}/",
-							"host": [
-								"{{base_url}}seekers"
-							],
-							"path": [
-								"experience",
-								"{{experience_id}}",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Delete Experience",
-					"request": {
-						"method": "DELETE",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}seekers/experience/{{experience_id}}/",
-							"host": [
-								"{{base_url}}seekers"
-							],
-							"path": [
-								"experience",
-								"{{experience_id}}",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Get All Skills",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}seekers/skills/",
-							"host": [
-								"{{base_url}}seekers"
-							],
-							"path": [
-								"skills",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Create Skill",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"skill_name\": \"Python\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}seekers/skills/",
-							"host": [
-								"{{base_url}}seekers"
-							],
-							"path": [
-								"skills",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Update Skill",
-					"request": {
-						"method": "PUT",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"skill_name\": \"Updated Skill Name\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}seekers/skills/{{skill_id}}/",
-							"host": [
-								"{{base_url}}seekers"
-							],
-							"path": [
-								"skills",
-								"{{skill_id}}",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Add Skill to Seeker",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"user_account\": \"{{user_id}}\",\n    \"skill_set\": \"skill-uuid-here\",\n    \"skill_level\": \"Advanced\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}seekers/seeker-skills/",
-							"host": [
-								"{{base_url}}seekers"
-							],
-							"path": [
-								"seeker-skills",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Update Seeker Skill",
-					"request": {
-						"method": "PUT",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"user_account\": \"{{user_id}}\",\n    \"skill_set\": \"skill-uuid-here\",\n    \"skill_level\": \"Expert\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}seekers/seeker-skills/{{seeker_skill_id}}/",
-							"host": [
-								"{{base_url}}seekers"
-							],
-							"path": [
-								"seeker-skills",
-								"{{seeker_skill_id}}",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Delete Seeker Skill",
-					"request": {
-						"method": "DELETE",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}seekers/seeker-skills/{{seeker_skill_id}}/",
-							"host": [
-								"{{base_url}}seekers"
-							],
-							"path": [
-								"seeker-skills",
-								"{{seeker_skill_id}}",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Get Seeker Stats",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}seekers/stats/{{user_id}}/",
-							"host": [
-								"{{base_url}}seekers"
-							],
-							"path": [
-								"stats",
-								"{{user_id}}",
-								""
-							]
-						}
-					},
-					"response": []
-				}
-			]
-		},
-		{
-			"name": "Companies",
-			"item": [
-				{
-					"name": "Company Management",
-					"item": []
-				},
-				{
-					"name": "Business Streams",
-					"item": []
-				},
-				{
-					"name": "Get Company Dashboard",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}companies/dashboard/{{user_id}}/",
-							"host": [
-								"{{base_url}}companies"
-							],
-							"path": [
-								"dashboard",
-								"{{user_id}}",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Get Business Streams",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}companies/business-streams/",
-							"host": [
-								"{{base_url}}companies"
-							],
-							"path": [
-								"business-streams",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Create Business Stream",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"business_stream_name\": \"Technology\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}companies/business-streams/",
-							"host": [
-								"{{base_url}}companies"
-							],
-							"path": [
-								"business-streams",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Update Business Stream",
-					"request": {
-						"method": "PUT",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"business_stream_name\": \"Updated Technology Stream\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}companies/business-streams/{{business_stream_id}}/",
-							"host": [
-								"{{base_url}}companies"
-							],
-							"path": [
-								"business-streams",
-								"{{business_stream_id}}",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Create Company Profile",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"exec": [
-									"if (pm.response.code === 201) {",
-									"    const response = pm.response.json();",
-									"    pm.collectionVariables.set('company_id', response.id);",
-									"}"
-								],
-								"type": "text/javascript",
-								"packages": {},
-								"requests": {}
-							}
-						}
-					],
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"user_account\": \"{{user_id}}\",\n    \"business_stream\": \"3b0d184d-2125-4a39-869f-a4cf705ee02a\",\n    \"company_name\": \"Tech Solutions Inc\",\n    \"profile_description\": \"Leading technology solutions provider\",\n    \"company_website_url\": \"https://techsolutions.com\",\n    \"contact_email\": \"contact@techsolutions.com\",\n    \"status\": \"active\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}companies/companies/",
-							"host": [
-								"{{base_url}}companies"
-							],
-							"path": [
-								"companies",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Get Companies",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}companies/companies/",
-							"host": [
-								"{{base_url}}companies"
-							],
-							"path": [
-								"companies",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Update Company Profile",
-					"request": {
-						"method": "PUT",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"user_account\": \"{{user_id}}\",\n    \"business_stream\": \"3b0d184d-2125-4a39-869f-a4cf705ee02a\",\n    \"company_name\": \"Updated Tech Solutions Inc\",\n    \"profile_description\": \"Updated company description\",\n    \"company_website_url\": \"https://updated-techsolutions.com\",\n    \"contact_email\": \"updated@techsolutions.com\",\n    \"status\": \"active\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}companies/companies/{{company_id}}/",
-							"host": [
-								"{{base_url}}companies"
-							],
-							"path": [
-								"companies",
-								"{{company_id}}",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Delete Company Profile",
-					"request": {
-						"method": "DELETE",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}companies/companies/{{company_id}}/",
-							"host": [
-								"{{base_url}}companies"
-							],
-							"path": [
-								"companies",
-								"{{company_id}}",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Upload Company Image",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"company\": \"{{company_id}}\",\n    \"image_url\": \"https://example.com/company-logo.png\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}companies/company-images/",
-							"host": [
-								"{{base_url}}companies"
-							],
-							"path": [
-								"company-images",
-								""
-							]
-						}
-					},
-					"response": []
-				}
-			]
-		},
-		{
-			"name": "Jobs",
-			"item": [
-				{
-					"name": "Job Configuration",
 					"item": [
 						{
-							"name": "Job Types",
-							"item": []
-						},
-						{
-							"name": "Job Locations",
-							"item": []
-						}
-					]
-				},
-				{
-					"name": "Job Posts",
-					"item": []
-				},
-				{
-					"name": "Job Applications",
-					"item": []
-				},
-				{
-					"name": "Job Skills",
-					"item": []
-				},
-				{
-					"name": "Get Job Types",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}jobs/job-types/",
-							"host": [
-								"{{base_url}}jobs"
-							],
-							"path": [
-								"job-types",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Create Job Type",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"job_type_name\": \"Full-time\",\n    \"description\": \"Full-time employment position\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}jobs/job-types/",
-							"host": [
-								"{{base_url}}jobs"
-							],
-							"path": [
-								"job-types",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Update Job Type",
-					"request": {
-						"method": "PUT",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"job_type_name\": \"Updated Full-time\",\n    \"description\": \"Updated full-time employment position\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}jobs/job-types/{{job_type_id}}/",
-							"host": [
-								"{{base_url}}jobs"
-							],
-							"path": [
-								"job-types",
-								"{{job_type_id}}",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Get Job Locations",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}jobs/job-locations/",
-							"host": [
-								"{{base_url}}jobs"
-							],
-							"path": [
-								"job-locations",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Create Job Location",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"street_address\": \"123 Tech Street\",\n    \"city\": \"San Francisco\",\n    \"country\": \"USA\",\n    \"zip\": \"94105\",\n    \"country_code\": \"US\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}jobs/job-locations/",
-							"host": [
-								"{{base_url}}jobs"
-							],
-							"path": [
-								"job-locations",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Update Job Location",
-					"request": {
-						"method": "PUT",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"street_address\": \"456 Updated Tech Street\",\n    \"city\": \"New York\",\n    \"country\": \"USA\",\n    \"zip\": \"10001\",\n    \"country_code\": \"US\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}jobs/job-locations/{{job_location_id}}/",
-							"host": [
-								"{{base_url}}jobs"
-							],
-							"path": [
-								"job-locations",
-								"{{job_location_id}}",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Get All Jobs",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}jobs/job-posts/",
-							"host": [
-								"{{base_url}}jobs"
-							],
-							"path": [
-								"job-posts",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Search Jobs",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}jobs/job-posts/?search=python&city=San Francisco",
-							"host": [
-								"{{base_url}}jobs"
-							],
-							"path": [
-								"job-posts",
-								""
-							],
-							"query": [
+							"name": "Skill Sets (Reference)",
+							"item": [
 								{
-									"key": "search",
-									"value": "python"
+									"name": "List All Skills",
+									"request": {
+										"method": "GET",
+										"header": [],
+										"url": {
+											"raw": "{{base_url}}/seekers/skill-sets/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"seekers",
+												"skill-sets",
+												""
+											]
+										},
+										"description": "Get all available skills in the system - Public access"
+									},
+									"response": []
 								},
 								{
-									"key": "city",
-									"value": "San Francisco"
+									"name": "Get Skill",
+									"request": {
+										"method": "GET",
+										"header": [],
+										"url": {
+											"raw": "{{base_url}}/seekers/skill-sets/{{skill_id}}/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"seekers",
+												"skill-sets",
+												"{{skill_id}}",
+												""
+											]
+										},
+										"description": "Get specific skill by ID"
+									},
+									"response": []
+								},
+								{
+									"name": "Create Skill",
+									"event": [
+										{
+											"listen": "test",
+											"script": {
+												"exec": [
+													"if (pm.response.code === 201) {",
+													"    const response = pm.response.json();",
+													"    pm.collectionVariables.set('skill_id', response.id);",
+													"    console.log('✅ Skill ID saved:', response.id);",
+													"}"
+												],
+												"type": "text/javascript"
+											}
+										}
+									],
+									"request": {
+										"auth": {
+											"type": "bearer",
+											"bearer": [
+												{
+													"key": "token",
+													"value": "{{access_token}}",
+													"type": "string"
+												}
+											]
+										},
+										"method": "POST",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											}
+										],
+										"body": {
+											"mode": "raw",
+											"raw": "{\n    \"skill_name\": \"Python\",\n    \"description\": \"Python programming language - versatile, high-level language for web development, data science, automation, and more\"\n}",
+											"options": {
+												"raw": {
+													"language": "json"
+												}
+											}
+										},
+										"url": {
+											"raw": "{{base_url}}/seekers/skill-sets/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"seekers",
+												"skill-sets",
+												""
+											]
+										},
+										"description": "Create new skill in system (Admin only)"
+									},
+									"response": []
+								},
+								{
+									"name": "Update Skill",
+									"request": {
+										"auth": {
+											"type": "bearer",
+											"bearer": [
+												{
+													"key": "token",
+													"value": "{{access_token}}",
+													"type": "string"
+												}
+											]
+										},
+										"method": "PUT",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											}
+										],
+										"body": {
+											"mode": "raw",
+											"raw": "{\n    \"skill_name\": \"Python 3.x\",\n    \"description\": \"Modern Python programming (3.8+) - web frameworks (Django, FastAPI), data analysis (Pandas, NumPy), machine learning, and automation\"\n}",
+											"options": {
+												"raw": {
+													"language": "json"
+												}
+											}
+										},
+										"url": {
+											"raw": "{{base_url}}/seekers/skill-sets/{{skill_id}}/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"seekers",
+												"skill-sets",
+												"{{skill_id}}",
+												""
+											]
+										},
+										"description": "Update skill (Admin only)"
+									},
+									"response": []
+								},
+								{
+									"name": "Delete Skill",
+									"request": {
+										"auth": {
+											"type": "bearer",
+											"bearer": [
+												{
+													"key": "token",
+													"value": "{{access_token}}",
+													"type": "string"
+												}
+											]
+										},
+										"method": "DELETE",
+										"header": [],
+										"url": {
+											"raw": "{{base_url}}/seekers/skill-sets/{{skill_id}}/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"seekers",
+												"skill-sets",
+												"{{skill_id}}",
+												""
+											]
+										},
+										"description": "Delete skill (Admin only)"
+									},
+									"response": []
+								}
+							]
+						},
+						{
+							"name": "Seeker Skills",
+							"item": [
+								{
+									"name": "List My Skills",
+									"request": {
+										"auth": {
+											"type": "bearer",
+											"bearer": [
+												{
+													"key": "token",
+													"value": "{{access_token}}",
+													"type": "string"
+												}
+											]
+										},
+										"method": "GET",
+										"header": [],
+										"url": {
+											"raw": "{{base_url}}/seekers/seeker-skills/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"seekers",
+												"seeker-skills",
+												""
+											]
+										},
+										"description": "Get skills for authenticated user's profile"
+									},
+									"response": []
+								},
+								{
+									"name": "Get Seeker Skill",
+									"request": {
+										"auth": {
+											"type": "bearer",
+											"bearer": [
+												{
+													"key": "token",
+													"value": "{{access_token}}",
+													"type": "string"
+												}
+											]
+										},
+										"method": "GET",
+										"header": [],
+										"url": {
+											"raw": "{{base_url}}/seekers/seeker-skills/{{seeker_skill_id}}/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"seekers",
+												"seeker-skills",
+												"{{seeker_skill_id}}",
+												""
+											]
+										},
+										"description": "Get specific seeker skill"
+									},
+									"response": []
+								},
+								{
+									"name": "Add Skill to Profile",
+									"event": [
+										{
+											"listen": "test",
+											"script": {
+												"exec": [
+													"if (pm.response.code === 201) {",
+													"    const response = pm.response.json();",
+													"    pm.collectionVariables.set('seeker_skill_id', response.id);",
+													"    console.log('✅ Seeker skill ID saved:', response.id);",
+													"}"
+												],
+												"type": "text/javascript"
+											}
+										}
+									],
+									"request": {
+										"auth": {
+											"type": "bearer",
+											"bearer": [
+												{
+													"key": "token",
+													"value": "{{access_token}}",
+													"type": "string"
+												}
+											]
+										},
+										"method": "POST",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											}
+										],
+										"body": {
+											"mode": "raw",
+											"raw": "{\n    \"seeker_profile\": \"{{profile_id}}\",\n    \"skill_set\": \"{{skill_id}}\",\n    \"skill_level\": \"Advanced\"\n}",
+											"options": {
+												"raw": {
+													"language": "json"
+												}
+											}
+										},
+										"url": {
+											"raw": "{{base_url}}/seekers/seeker-skills/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"seekers",
+												"seeker-skills",
+												""
+											]
+										},
+										"description": "Add skill to seeker profile. **Levels:** Beginner, Intermediate, Advanced, Expert"
+									},
+									"response": []
+								},
+								{
+									"name": "Update Skill Level",
+									"request": {
+										"auth": {
+											"type": "bearer",
+											"bearer": [
+												{
+													"key": "token",
+													"value": "{{access_token}}",
+													"type": "string"
+												}
+											]
+										},
+										"method": "PUT",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											}
+										],
+										"body": {
+											"mode": "raw",
+											"raw": "{\n    \"seeker_profile\": \"{{profile_id}}\",\n    \"skill_set\": \"{{skill_id}}\",\n    \"skill_level\": \"Expert\"\n}",
+											"options": {
+												"raw": {
+													"language": "json"
+												}
+											}
+										},
+										"url": {
+											"raw": "{{base_url}}/seekers/seeker-skills/{{seeker_skill_id}}/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"seekers",
+												"seeker-skills",
+												"{{seeker_skill_id}}",
+												""
+											]
+										},
+										"description": "Update skill level (Owner or Admin)"
+									},
+									"response": []
+								},
+								{
+									"name": "Remove Skill from Profile",
+									"request": {
+										"auth": {
+											"type": "bearer",
+											"bearer": [
+												{
+													"key": "token",
+													"value": "{{access_token}}",
+													"type": "string"
+												}
+											]
+										},
+										"method": "DELETE",
+										"header": [],
+										"url": {
+											"raw": "{{base_url}}/seekers/seeker-skills/{{seeker_skill_id}}/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"seekers",
+												"seeker-skills",
+												"{{seeker_skill_id}}",
+												""
+											]
+										},
+										"description": "Remove skill from profile (Owner or Admin)"
+									},
+									"response": []
 								}
 							]
 						}
-					},
-					"response": []
-				},
-				{
-					"name": "Create Job Post",
-					"event": [
-						{
-							"listen": "test",
-							"script": {
-								"exec": [
-									"if (pm.response.code === 201) {",
-									"    const response = pm.response.json();",
-									"    pm.collectionVariables.set('job_id', response.id);",
-									"}"
-								],
-								"type": "text/javascript",
-								"packages": {},
-								"requests": {}
-							}
-						}
 					],
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"company\": \"{{company_id}}\",\n    \"job_type\": \"job-type-uuid-here\",\n    \"job_location\": \"job-location-uuid-here\",\n    \"job_title\": \"Senior Python Developer\",\n    \"job_description\": \"We are looking for an experienced Python developer to join our team. The ideal candidate will have 3+ years of experience with Django, REST APIs, and PostgreSQL.\",\n    \"salary_min\": 80000.00,\n    \"salary_max\": 120000.00,\n    \"salary_type\": \"yearly\",\n    \"deadline_date\": \"2024-03-31\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}jobs/job-posts/",
-							"host": [
-								"{{base_url}}jobs"
-							],
-							"path": [
-								"job-posts",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Get Job By ID",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}jobs/job-posts/{{job_id}}/",
-							"host": [
-								"{{base_url}}jobs"
-							],
-							"path": [
-								"job-posts",
-								"{{job_id}}",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Update Job Post",
-					"request": {
-						"method": "PUT",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"company\": \"{{company_id}}\",\n    \"job_type\": \"job-type-uuid-here\",\n    \"job_location\": \"job-location-uuid-here\",\n    \"job_title\": \"Updated Senior Python Developer\",\n    \"job_description\": \"Updated job description with new requirements and responsibilities.\",\n    \"salary_min\": 90000.00,\n    \"salary_max\": 140000.00,\n    \"salary_type\": \"yearly\",\n    \"deadline_date\": \"2024-06-30\",\n    \"is_published\": true,\n    \"is_active\": true\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}jobs/job-posts/{{job_id}}/",
-							"host": [
-								"{{base_url}}jobs"
-							],
-							"path": [
-								"job-posts",
-								"{{job_id}}",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Delete Job Post",
-					"request": {
-						"method": "DELETE",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}jobs/job-posts/{{job_id}}/",
-							"host": [
-								"{{base_url}}jobs"
-							],
-							"path": [
-								"job-posts",
-								"{{job_id}}",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Apply for Job",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"user_account\": \"{{user_id}}\",\n    \"job_post\": \"{{job_id}}\",\n    \"cover_letter\": \"I am excited to apply for this position. With my 3+ years of Python and Django experience, I believe I would be a great fit for your team. I have worked on several REST API projects and have extensive experience with PostgreSQL databases.\"\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}jobs/apply/",
-							"host": [
-								"{{base_url}}jobs"
-							],
-							"path": [
-								"apply",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Get User Applications",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}jobs/applications/user/{{user_id}}/",
-							"host": [
-								"{{base_url}}jobs"
-							],
-							"path": [
-								"applications",
-								"user",
-								"{{user_id}}",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Get Job Applications",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}jobs/applications/job/{{job_id}}/",
-							"host": [
-								"{{base_url}}jobs"
-							],
-							"path": [
-								"applications",
-								"job",
-								"{{job_id}}",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Add Job Skill Requirement",
-					"request": {
-						"method": "POST",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"job_post\": \"{{job_id}}\",\n    \"skill_set\": \"skill-uuid-here\",\n    \"skill_level\": \"Advanced\",\n    \"is_required\": true\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}jobs/job-skills/",
-							"host": [
-								"{{base_url}}jobs"
-							],
-							"path": [
-								"job-skills",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Update Job Skill Requirement",
-					"request": {
-						"method": "PUT",
-						"header": [
-							{
-								"key": "Content-Type",
-								"value": "application/json"
-							}
-						],
-						"body": {
-							"mode": "raw",
-							"raw": "{\n    \"job_post\": \"{{job_id}}\",\n    \"skill_set\": \"skill-uuid-here\",\n    \"skill_level\": \"Expert\",\n    \"is_required\": false\n}"
-						},
-						"url": {
-							"raw": "{{base_url}}jobs/job-skills/{{job_skill_id}}/",
-							"host": [
-								"{{base_url}}jobs"
-							],
-							"path": [
-								"job-skills",
-								"{{job_skill_id}}",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Delete Job Skill Requirement",
-					"request": {
-						"method": "DELETE",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}jobs/job-skills/{{job_skill_id}}/",
-							"host": [
-								"{{base_url}}jobs"
-							],
-							"path": [
-								"job-skills",
-								"{{job_skill_id}}",
-								""
-							]
-						}
-					},
-					"response": []
-				},
-				{
-					"name": "Get All Job Applications",
-					"request": {
-						"method": "GET",
-						"header": [],
-						"url": {
-							"raw": "{{base_url}}jobs/job-applications/",
-							"host": [
-								"{{base_url}}jobs"
-							],
-							"path": [
-								"job-applications",
-								""
-							]
-						}
-					},
-					"response": []
+					"description": "Skill sets and seeker skills"
 				}
 			]
-		}
-	],
-	"auth": {
-		"type": "basic",
-		"basic": [
-			{
-				"key": "username",
-				"value": "{{email}}",
-				"type": "string"
-			},
-			{
-				"key": "password",
-				"value": "{{password}}",
-				"type": "string"
-			}
-		]
-	},
-	"event": [
-		{
-			"listen": "prerequest",
-			"script": {
-				"type": "text/javascript",
-				"requests": {},
-				"exec": [
-					""
-				]
-			}
 		},
 		{
-			"listen": "test",
-			"script": {
-				"type": "text/javascript",
-				"requests": {},
-				"exec": [
-					""
-				]
-			}
-		}
-	],
-	"variable": [
-		{
-			"key": "base_url",
-			"value": "http://localhost:8000/api/v1"
+			"name": "Jobs API",
+			"item": [
+				{
+					"name": "Reference Data",
+					"item": [
+						{
+							"name": "Job Types",
+							"item": [
+								{
+									"name": "List Job Types",
+									"request": {
+										"method": "GET",
+										"header": [],
+										"url": {
+											"raw": "{{base_url}}/jobs/job-types/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"jobs",
+												"job-types",
+												""
+											]
+										},
+										"description": "Get all job types (Full-time, Part-time, Contract, etc.) - Public access"
+									},
+									"response": []
+								},
+								{
+									"name": "Get Job Type",
+									"request": {
+										"method": "GET",
+										"header": [],
+										"url": {
+											"raw": "{{base_url}}/jobs/job-types/{{job_type_id}}/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"jobs",
+												"job-types",
+												"{{job_type_id}}",
+												""
+											]
+										},
+										"description": "Get specific job type by ID"
+									},
+									"response": []
+								},
+								{
+									"name": "Create Job Type",
+									"event": [
+										{
+											"listen": "test",
+											"script": {
+												"exec": [
+													"if (pm.response.code === 201) {",
+													"    const response = pm.response.json();",
+													"    pm.collectionVariables.set('job_type_id', response.id);",
+													"    console.log('✅ Job type ID saved:', response.id);",
+													"}"
+												],
+												"type": "text/javascript"
+											}
+										}
+									],
+									"request": {
+										"auth": {
+											"type": "bearer",
+											"bearer": [
+												{
+													"key": "token",
+													"value": "{{access_token}}",
+													"type": "string"
+												}
+											]
+										},
+										"method": "POST",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											}
+										],
+										"body": {
+											"mode": "raw",
+											"raw": "{\n    \"job_type_name\": \"Full-time\",\n    \"description\": \"Full-time permanent employment position\"\n}",
+											"options": {
+												"raw": {
+													"language": "json"
+												}
+											}
+										},
+										"url": {
+											"raw": "{{base_url}}/jobs/job-types/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"jobs",
+												"job-types",
+												""
+											]
+										},
+										"description": "Create job type (Admin only)"
+									},
+									"response": []
+								},
+								{
+									"name": "Update Job Type",
+									"request": {
+										"auth": {
+											"type": "bearer",
+											"bearer": [
+												{
+													"key": "token",
+													"value": "{{access_token}}",
+													"type": "string"
+												}
+											]
+										},
+										"method": "PUT",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											}
+										],
+										"body": {
+											"mode": "raw",
+											"raw": "{\n    \"job_type_name\": \"Full-time Permanent\",\n    \"description\": \"Full-time permanent employment with benefits\"\n}",
+											"options": {
+												"raw": {
+													"language": "json"
+												}
+											}
+										},
+										"url": {
+											"raw": "{{base_url}}/jobs/job-types/{{job_type_id}}/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"jobs",
+												"job-types",
+												"{{job_type_id}}",
+												""
+											]
+										},
+										"description": "Update job type (Admin only)"
+									},
+									"response": []
+								},
+								{
+									"name": "Delete Job Type",
+									"request": {
+										"auth": {
+											"type": "bearer",
+											"bearer": [
+												{
+													"key": "token",
+													"value": "{{access_token}}",
+													"type": "string"
+												}
+											]
+										},
+										"method": "DELETE",
+										"header": [],
+										"url": {
+											"raw": "{{base_url}}/jobs/job-types/{{job_type_id}}/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"jobs",
+												"job-types",
+												"{{job_type_id}}",
+												""
+											]
+										},
+										"description": "Delete job type (Admin only)"
+									},
+									"response": []
+								}
+							]
+						},
+						{
+							"name": "Job Locations",
+							"item": [
+								{
+									"name": "List Job Locations",
+									"request": {
+										"method": "GET",
+										"header": [],
+										"url": {
+											"raw": "{{base_url}}/jobs/job-locations/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"jobs",
+												"job-locations",
+												""
+											]
+										},
+										"description": "Get all job locations - Public access"
+									},
+									"response": []
+								},
+								{
+									"name": "Get Job Location",
+									"request": {
+										"method": "GET",
+										"header": [],
+										"url": {
+											"raw": "{{base_url}}/jobs/job-locations/{{job_location_id}}/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"jobs",
+												"job-locations",
+												"{{job_location_id}}",
+												""
+											]
+										},
+										"description": "Get specific job location by ID"
+									},
+									"response": []
+								},
+								{
+									"name": "Create Job Location",
+									"event": [
+										{
+											"listen": "test",
+											"script": {
+												"exec": [
+													"if (pm.response.code === 201) {",
+													"    const response = pm.response.json();",
+													"    pm.collectionVariables.set('job_location_id', response.id);",
+													"    console.log('✅ Job location ID saved:', response.id);",
+													"}"
+												],
+												"type": "text/javascript"
+											}
+										}
+									],
+									"request": {
+										"auth": {
+											"type": "bearer",
+											"bearer": [
+												{
+													"key": "token",
+													"value": "{{access_token}}",
+													"type": "string"
+												}
+											]
+										},
+										"method": "POST",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											}
+										],
+										"body": {
+											"mode": "raw",
+											"raw": "{\n    \"street_address\": \"123 Tech Boulevard\",\n    \"city\": \"San Francisco\",\n    \"country\": \"USA\",\n    \"zip\": \"94105\",\n    \"country_code\": \"US\"\n}",
+											"options": {
+												"raw": {
+													"language": "json"
+												}
+											}
+										},
+										"url": {
+											"raw": "{{base_url}}/jobs/job-locations/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"jobs",
+												"job-locations",
+												""
+											]
+										},
+										"description": "Create job location (Admin only)"
+									},
+									"response": []
+								},
+								{
+									"name": "Update Job Location",
+									"request": {
+										"auth": {
+											"type": "bearer",
+											"bearer": [
+												{
+													"key": "token",
+													"value": "{{access_token}}",
+													"type": "string"
+												}
+											]
+										},
+										"method": "PUT",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											}
+										],
+										"body": {
+											"mode": "raw",
+											"raw": "{\n    \"street_address\": \"456 Innovation Drive\",\n    \"city\": \"New York\",\n    \"country\": \"USA\",\n    \"zip\": \"10001\",\n    \"country_code\": \"US\"\n}",
+											"options": {
+												"raw": {
+													"language": "json"
+												}
+											}
+										},
+										"url": {
+											"raw": "{{base_url}}/jobs/job-locations/{{job_location_id}}/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"jobs",
+												"job-locations",
+												"{{job_location_id}}",
+												""
+											]
+										},
+										"description": "Update job location (Admin only)"
+									},
+									"response": []
+								},
+								{
+									"name": "Delete Job Location",
+									"request": {
+										"auth": {
+											"type": "bearer",
+											"bearer": [
+												{
+													"key": "token",
+													"value": "{{access_token}}",
+													"type": "string"
+												}
+											]
+										},
+										"method": "DELETE",
+										"header": [],
+										"url": {
+											"raw": "{{base_url}}/jobs/job-locations/{{job_location_id}}/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"jobs",
+												"job-locations",
+												"{{job_location_id}}",
+												""
+											]
+										},
+										"description": "Delete job location (Admin only)"
+									},
+									"response": []
+								}
+							]
+						}
+					],
+					"description": "Job types and locations (Admin-managed reference data)"
+				},
+				{
+					"name": "Job Posts",
+					"item": [
+						{
+							"name": "Browse & Search",
+							"item": [
+								{
+									"name": "List All Jobs",
+									"request": {
+										"method": "GET",
+										"header": [],
+										"url": {
+											"raw": "{{base_url}}/jobs/job-posts/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"jobs",
+												"job-posts",
+												""
+											]
+										},
+										"description": "Get all published and active jobs - Public access"
+									},
+									"response": []
+								},
+								{
+									"name": "Search Jobs by Keyword",
+									"request": {
+										"method": "GET",
+										"header": [],
+										"url": {
+											"raw": "{{base_url}}/jobs/job-posts/?search=python developer",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"jobs",
+												"job-posts",
+												""
+											],
+											"query": [
+												{
+													"key": "search",
+													"value": "python developer",
+													"description": "Search in job title and description"
+												}
+											]
+										},
+										"description": "Search jobs by keyword in title or description"
+									},
+									"response": []
+								},
+								{
+									"name": "Search Jobs by City",
+									"request": {
+										"method": "GET",
+										"header": [],
+										"url": {
+											"raw": "{{base_url}}/jobs/job-posts/?city=San Francisco",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"jobs",
+												"job-posts",
+												""
+											],
+											"query": [
+												{
+													"key": "city",
+													"value": "San Francisco",
+													"description": "Filter by city name"
+												}
+											]
+										},
+										"description": "Filter jobs by location city"
+									},
+									"response": []
+								},
+								{
+									"name": "Advanced Search (Keyword + City)",
+									"request": {
+										"method": "GET",
+										"header": [],
+										"url": {
+											"raw": "{{base_url}}/jobs/job-posts/?search=python&city=San Francisco",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"jobs",
+												"job-posts",
+												""
+											],
+											"query": [
+												{
+													"key": "search",
+													"value": "python"
+												},
+												{
+													"key": "city",
+													"value": "San Francisco"
+												}
+											]
+										},
+										"description": "Combined search with keyword and city filter"
+									},
+									"response": []
+								},
+								{
+									"name": "Get Job By ID",
+									"request": {
+										"method": "GET",
+										"header": [],
+										"url": {
+											"raw": "{{base_url}}/jobs/job-posts/{{job_id}}/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"jobs",
+												"job-posts",
+												"{{job_id}}",
+												""
+											]
+										},
+										"description": "Get specific job details by ID"
+									},
+									"response": []
+								}
+							]
+						},
+						{
+							"name": "Job Management",
+							"item": [
+								{
+									"name": "Create Job Post",
+									"event": [
+										{
+											"listen": "test",
+											"script": {
+												"exec": [
+													"if (pm.response.code === 201) {",
+													"    const response = pm.response.json();",
+													"    pm.collectionVariables.set('job_id', response.id);",
+													"    console.log('✅ Job ID saved:', response.id);",
+													"}"
+												],
+												"type": "text/javascript"
+											}
+										}
+									],
+									"request": {
+										"auth": {
+											"type": "bearer",
+											"bearer": [
+												{
+													"key": "token",
+													"value": "{{access_token}}",
+													"type": "string"
+												}
+											]
+										},
+										"method": "POST",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											}
+										],
+										"body": {
+											"mode": "raw",
+											"raw": "{\n    \"job_type\": \"{{job_type_id}}\",\n    \"job_location\": \"{{job_location_id}}\",\n    \"job_title\": \"Senior Python Developer\",\n    \"job_description\": \"We are seeking an experienced Python developer to join our growing team. The ideal candidate will have 5+ years of experience with Django, REST APIs, PostgreSQL, and cloud technologies. You'll work on cutting-edge projects and collaborate with a talented team of engineers.\",\n    \"salary_min\": 100000.00,\n    \"salary_max\": 150000.00,\n    \"salary_type\": \"yearly\",\n    \"deadline_date\": \"2025-12-31\",\n    \"is_published\": true,\n    \"is_active\": true\n}",
+											"options": {
+												"raw": {
+													"language": "json"
+												}
+											}
+										},
+										"url": {
+											"raw": "{{base_url}}/jobs/job-posts/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"jobs",
+												"job-posts",
+												""
+											]
+										},
+										"description": "Create job post (Company users only). Company is auto-assigned from user's profile."
+									},
+									"response": []
+								},
+								{
+									"name": "Update Job Post (Full)",
+									"request": {
+										"auth": {
+											"type": "bearer",
+											"bearer": [
+												{
+													"key": "token",
+													"value": "{{access_token}}",
+													"type": "string"
+												}
+											]
+										},
+										"method": "PUT",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											}
+										],
+										"body": {
+											"mode": "raw",
+											"raw": "{\n    \"job_type\": \"{{job_type_id}}\",\n    \"job_location\": \"{{job_location_id}}\",\n    \"job_title\": \"Lead Python Developer\",\n    \"job_description\": \"Updated: We're looking for a technical leader with 7+ years of Python experience. Lead our engineering team, mentor junior developers, and architect scalable solutions using Django, FastAPI, Docker, and AWS.\",\n    \"salary_min\": 120000.00,\n    \"salary_max\": 180000.00,\n    \"salary_type\": \"yearly\",\n    \"deadline_date\": \"2026-03-31\",\n    \"is_published\": true,\n    \"is_active\": true\n}",
+											"options": {
+												"raw": {
+													"language": "json"
+												}
+											}
+										},
+										"url": {
+											"raw": "{{base_url}}/jobs/job-posts/{{job_id}}/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"jobs",
+												"job-posts",
+												"{{job_id}}",
+												""
+											]
+										},
+										"description": "Full update of job post (Job poster or Admin)"
+									},
+									"response": []
+								},
+								{
+									"name": "Update Job Post (Partial)",
+									"request": {
+										"auth": {
+											"type": "bearer",
+											"bearer": [
+												{
+													"key": "token",
+													"value": "{{access_token}}",
+													"type": "string"
+												}
+											]
+										},
+										"method": "PATCH",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											}
+										],
+										"body": {
+											"mode": "raw",
+											"raw": "{\n    \"deadline_date\": \"2026-06-30\",\n    \"salary_max\": 160000.00\n}",
+											"options": {
+												"raw": {
+													"language": "json"
+												}
+											}
+										},
+										"url": {
+											"raw": "{{base_url}}/jobs/job-posts/{{job_id}}/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"jobs",
+												"job-posts",
+												"{{job_id}}",
+												""
+											]
+										},
+										"description": "Partial update of job post"
+									},
+									"response": []
+								},
+								{
+									"name": "Unpublish Job",
+									"request": {
+										"auth": {
+											"type": "bearer",
+											"bearer": [
+												{
+													"key": "token",
+													"value": "{{access_token}}",
+													"type": "string"
+												}
+											]
+										},
+										"method": "PATCH",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											}
+										],
+										"body": {
+											"mode": "raw",
+											"raw": "{\n    \"is_published\": false\n}",
+											"options": {
+												"raw": {
+													"language": "json"
+												}
+											}
+										},
+										"url": {
+											"raw": "{{base_url}}/jobs/job-posts/{{job_id}}/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"jobs",
+												"job-posts",
+												"{{job_id}}",
+												""
+											]
+										},
+										"description": "Unpublish job post (hide from public)"
+									},
+									"response": []
+								},
+								{
+									"name": "Delete Job Post",
+									"request": {
+										"auth": {
+											"type": "bearer",
+											"bearer": [
+												{
+													"key": "token",
+													"value": "{{access_token}}",
+													"type": "string"
+												}
+											]
+										},
+										"method": "DELETE",
+										"header": [],
+										"url": {
+											"raw": "{{base_url}}/jobs/job-posts/{{job_id}}/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"jobs",
+												"job-posts",
+												"{{job_id}}",
+												""
+											]
+										},
+										"description": "Delete job post (Job poster or Admin)"
+									},
+									"response": []
+								}
+							]
+						}
+					],
+					"description": "Job posting management and search"
+				},
+				{
+					"name": "Job Applications",
+					"item": [
+						{
+							"name": "Apply for Job",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"if (pm.response.code === 201) {",
+											"    const response = pm.response.json();",
+											"    pm.collectionVariables.set('application_id', response.data.id);",
+											"    console.log('✅ Application submitted:', response.data.id);",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"user_account\": \"{{user_id}}\",\n    \"job_post\": \"{{job_id}}\",\n    \"cover_letter\": \"Dear Hiring Manager,\\n\\nI am excited to apply for the Senior Python Developer position. With over 6 years of experience building scalable web applications using Django and REST frameworks, I am confident I would be a valuable addition to your team.\\n\\nMy expertise includes PostgreSQL database design, Docker containerization, and AWS cloud deployments. I have led multiple projects from conception to production, always focusing on clean code and best practices.\\n\\nI look forward to discussing how my skills align with your needs.\\n\\nBest regards\"\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{base_url}}/jobs/apply/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"jobs",
+										"apply",
+										""
+									]
+								},
+								"description": "Submit job application (Job seekers only). Prevents duplicate applications."
+							},
+							"response": []
+						},
+						{
+							"name": "List All Applications",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/jobs/job-applications/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"jobs",
+										"job-applications",
+										""
+									]
+								},
+								"description": "Get applications. **Filtering:**\n- Job seekers: Own applications\n- Companies: Applications to their jobs\n- Admins: All applications"
+							},
+							"response": []
+						},
+						{
+							"name": "Get Application By ID",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/jobs/job-applications/{{application_id}}/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"jobs",
+										"job-applications",
+										"{{application_id}}",
+										""
+									]
+								},
+								"description": "Get specific application details"
+							},
+							"response": []
+						},
+						{
+							"name": "Get Applications by Job",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/jobs/applications/job/{{job_id}}/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"jobs",
+										"applications",
+										"job",
+										"{{job_id}}",
+										""
+									]
+								},
+								"description": "Get all applications for a specific job (Company owner or Admin)"
+							},
+							"response": []
+						},
+						{
+							"name": "Get Applications by User",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/jobs/applications/user/{{user_id}}/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"jobs",
+										"applications",
+										"user",
+										"{{user_id}}",
+										""
+									]
+								},
+								"description": "Get all applications by a user (User or Admin)"
+							},
+							"response": []
+						},
+						{
+							"name": "Update Application Status",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "PATCH",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"application_status\": \"reviewed\"\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{base_url}}/jobs/job-applications/{{application_id}}/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"jobs",
+										"job-applications",
+										"{{application_id}}",
+										""
+									]
+								},
+								"description": "Update application status. **Statuses:** pending, reviewed, accepted, rejected, withdrawn"
+							},
+							"response": []
+						},
+						{
+							"name": "Withdraw Application",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "PATCH",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"application_status\": \"withdrawn\"\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{base_url}}/jobs/job-applications/{{application_id}}/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"jobs",
+										"job-applications",
+										"{{application_id}}",
+										""
+									]
+								},
+								"description": "Withdraw application (Applicant only)"
+							},
+							"response": []
+						}
+					],
+					"description": "Job application submission and management"
+				},
+				{
+					"name": "Job Skills",
+					"item": [
+						{
+							"name": "List Job Skills",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/jobs/job-skills/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"jobs",
+										"job-skills",
+										""
+									]
+								},
+								"description": "Get all job skill requirements"
+							},
+							"response": []
+						},
+						{
+							"name": "Get Job Skill",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/jobs/job-skills/{{job_skill_id}}/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"jobs",
+										"job-skills",
+										"{{job_skill_id}}",
+										""
+									]
+								},
+								"description": "Get specific job skill requirement"
+							},
+							"response": []
+						},
+						{
+							"name": "Add Skill Requirement",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"if (pm.response.code === 201) {",
+											"    const response = pm.response.json();",
+											"    pm.collectionVariables.set('job_skill_id', response.id);",
+											"    console.log('✅ Job skill ID saved:', response.id);",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"job_post\": \"{{job_id}}\",\n    \"skill_set\": \"{{skill_id}}\",\n    \"skill_level\": \"Advanced\",\n    \"is_required\": true\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{base_url}}/jobs/job-skills/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"jobs",
+										"job-skills",
+										""
+									]
+								},
+								"description": "Add skill requirement to job (Job poster or Admin). **Levels:** Beginner, Intermediate, Advanced, Expert"
+							},
+							"response": []
+						},
+						{
+							"name": "Update Skill Requirement",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "PUT",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"job_post\": \"{{job_id}}\",\n    \"skill_set\": \"{{skill_id}}\",\n    \"skill_level\": \"Expert\",\n    \"is_required\": false\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{base_url}}/jobs/job-skills/{{job_skill_id}}/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"jobs",
+										"job-skills",
+										"{{job_skill_id}}",
+										""
+									]
+								},
+								"description": "Update skill requirement (Job poster or Admin)"
+							},
+							"response": []
+						},
+						{
+							"name": "Delete Skill Requirement",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "DELETE",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/jobs/job-skills/{{job_skill_id}}/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"jobs",
+										"job-skills",
+										"{{job_skill_id}}",
+										""
+									]
+								},
+								"description": "Remove skill requirement from job (Job poster or Admin)"
+							},
+							"response": []
+						}
+					],
+					"description": "Skill requirements for job postings"
+				}
+			]
 		},
 		{
-			"key": "email",
-			"value": "test@example.com"
-		},
-		{
-			"key": "password",
-			"value": "testpass123"
-		},
-		{
-			"key": "user_id",
-			"value": ""
-		},
-		{
-			"key": "company_id",
-			"value": ""
-		},
-		{
-			"key": "job_id",
-			"value": ""
-		},
-		{
-			"value": ""
+			"name": "Companies API",
+			"item": [
+				{
+					"name": "Business Streams",
+					"item": [
+						{
+							"name": "List Business Streams",
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/companies/business-streams/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"companies",
+										"business-streams",
+										""
+									]
+								},
+								"description": "Get all business categories/industries (Public access)"
+							},
+							"response": []
+						},
+						{
+							"name": "Get Business Stream",
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/companies/business-streams/{{business_stream_id}}/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"companies",
+										"business-streams",
+										"{{business_stream_id}}",
+										""
+									]
+								},
+								"description": "Get specific business stream by ID"
+							},
+							"response": []
+						},
+						{
+							"name": "Create Business Stream",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"if (pm.response.code === 201) {",
+											"    const response = pm.response.json();",
+											"    pm.collectionVariables.set('business_stream_id', response.id);",
+											"    console.log('✅ Business stream ID saved:', response.id);",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"business_stream_name\": \"Technology\"\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{base_url}}/companies/business-streams/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"companies",
+										"business-streams",
+										""
+									]
+								},
+								"description": "Create new business stream (Admin only)"
+							},
+							"response": []
+						},
+						{
+							"name": "Update Business Stream",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "PUT",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"business_stream_name\": \"Information Technology\"\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{base_url}}/companies/business-streams/{{business_stream_id}}/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"companies",
+										"business-streams",
+										"{{business_stream_id}}",
+										""
+									]
+								},
+								"description": "Update business stream (Admin only)"
+							},
+							"response": []
+						},
+						{
+							"name": "Delete Business Stream",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "DELETE",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/companies/business-streams/{{business_stream_id}}/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"companies",
+										"business-streams",
+										"{{business_stream_id}}",
+										""
+									]
+								},
+								"description": "Delete business stream (Admin only)"
+							},
+							"response": []
+						}
+					],
+					"description": "Industry categories for companies (Admin-managed reference data)"
+				},
+				{
+					"name": "Company Profiles",
+					"item": [
+						{
+							"name": "Company CRUD",
+							"item": [
+								{
+									"name": "List Companies",
+									"request": {
+										"auth": {
+											"type": "bearer",
+											"bearer": [
+												{
+													"key": "token",
+													"value": "{{access_token}}",
+													"type": "string"
+												}
+											]
+										},
+										"method": "GET",
+										"header": [],
+										"url": {
+											"raw": "{{base_url}}/companies/companies/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"companies",
+												"companies",
+												""
+											]
+										},
+										"description": "Get all companies. **Filtering:**\n- Admins: See all companies\n- Company users: See own company\n- Job seekers: See active companies only"
+									},
+									"response": []
+								},
+								{
+									"name": "Get Company",
+									"request": {
+										"auth": {
+											"type": "bearer",
+											"bearer": [
+												{
+													"key": "token",
+													"value": "{{access_token}}",
+													"type": "string"
+												}
+											]
+										},
+										"method": "GET",
+										"header": [],
+										"url": {
+											"raw": "{{base_url}}/companies/companies/{{company_id}}/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"companies",
+												"companies",
+												"{{company_id}}",
+												""
+											]
+										},
+										"description": "Get specific company details by ID"
+									},
+									"response": []
+								},
+								{
+									"name": "Create Company",
+									"event": [
+										{
+											"listen": "test",
+											"script": {
+												"exec": [
+													"if (pm.response.code === 201) {",
+													"    const response = pm.response.json();",
+													"    pm.collectionVariables.set('company_id', response.id);",
+													"    console.log('✅ Company ID saved:', response.id);",
+													"}"
+												],
+												"type": "text/javascript"
+											}
+										}
+									],
+									"request": {
+										"auth": {
+											"type": "bearer",
+											"bearer": [
+												{
+													"key": "token",
+													"value": "{{access_token}}",
+													"type": "string"
+												}
+											]
+										},
+										"method": "POST",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											}
+										],
+										"body": {
+											"mode": "raw",
+											"raw": "{\n    \"business_stream\": \"{{business_stream_id}}\",\n    \"company_name\": \"Tech Innovations Inc\",\n    \"profile_description\": \"Leading provider of innovative technology solutions for businesses worldwide. Specializing in cloud computing, AI, and enterprise software.\",\n    \"company_website_url\": \"https://techinnovations.com\",\n    \"contact_email\": \"contact@techinnovations.com\",\n    \"status\": \"active\"\n}",
+											"options": {
+												"raw": {
+													"language": "json"
+												}
+											}
+										},
+										"url": {
+											"raw": "{{base_url}}/companies/companies/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"companies",
+												"companies",
+												""
+											]
+										},
+										"description": "Create company profile (Company users only). User account is auto-assigned."
+									},
+									"response": []
+								},
+								{
+									"name": "Update Company (Full)",
+									"request": {
+										"auth": {
+											"type": "bearer",
+											"bearer": [
+												{
+													"key": "token",
+													"value": "{{access_token}}",
+													"type": "string"
+												}
+											]
+										},
+										"method": "PUT",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											}
+										],
+										"body": {
+											"mode": "raw",
+											"raw": "{\n    \"business_stream\": \"{{business_stream_id}}\",\n    \"company_name\": \"Tech Innovations Global Inc\",\n    \"profile_description\": \"Updated: Premier technology solutions provider with global reach. Experts in cloud, AI, and enterprise digital transformation.\",\n    \"company_website_url\": \"https://techinnovations-global.com\",\n    \"contact_email\": \"info@techinnovations-global.com\",\n    \"status\": \"active\"\n}",
+											"options": {
+												"raw": {
+													"language": "json"
+												}
+											}
+										},
+										"url": {
+											"raw": "{{base_url}}/companies/companies/{{company_id}}/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"companies",
+												"companies",
+												"{{company_id}}",
+												""
+											]
+										},
+										"description": "Full update of company profile (Owner or Admin)"
+									},
+									"response": []
+								},
+								{
+									"name": "Update Company (Partial)",
+									"request": {
+										"auth": {
+											"type": "bearer",
+											"bearer": [
+												{
+													"key": "token",
+													"value": "{{access_token}}",
+													"type": "string"
+												}
+											]
+										},
+										"method": "PATCH",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											}
+										],
+										"body": {
+											"mode": "raw",
+											"raw": "{\n    \"contact_email\": \"newemail@techinnovations.com\",\n    \"company_website_url\": \"https://new-website.com\"\n}",
+											"options": {
+												"raw": {
+													"language": "json"
+												}
+											}
+										},
+										"url": {
+											"raw": "{{base_url}}/companies/companies/{{company_id}}/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"companies",
+												"companies",
+												"{{company_id}}",
+												""
+											]
+										},
+										"description": "Partial update of company profile"
+									},
+									"response": []
+								},
+								{
+									"name": "Delete Company",
+									"request": {
+										"auth": {
+											"type": "bearer",
+											"bearer": [
+												{
+													"key": "token",
+													"value": "{{access_token}}",
+													"type": "string"
+												}
+											]
+										},
+										"method": "DELETE",
+										"header": [],
+										"url": {
+											"raw": "{{base_url}}/companies/companies/{{company_id}}/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"companies",
+												"companies",
+												"{{company_id}}",
+												""
+											]
+										},
+										"description": "Delete company profile (Owner or Admin only)"
+									},
+									"response": []
+								}
+							]
+						},
+						{
+							"name": "Company Dashboard",
+							"item": [
+								{
+									"name": "Get Company Dashboard",
+									"request": {
+										"auth": {
+											"type": "bearer",
+											"bearer": [
+												{
+													"key": "token",
+													"value": "{{access_token}}",
+													"type": "string"
+												}
+											]
+										},
+										"method": "GET",
+										"header": [],
+										"url": {
+											"raw": "{{base_url}}/companies/dashboard/{{user_id}}/",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"companies",
+												"dashboard",
+												"{{user_id}}",
+												""
+											]
+										},
+										"description": "Get company dashboard with profile and images (Owner or Admin only)"
+									},
+									"response": []
+								}
+							]
+						}
+					],
+					"description": "Company profile management and CRUD operations"
+				},
+				{
+					"name": "Company Images",
+					"item": [
+						{
+							"name": "List Company Images",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/companies/company-images/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"companies",
+										"company-images",
+										""
+									]
+								},
+								"description": "Get all company images. **Filtering:**\n- Admins: All images\n- Companies: Own images\n- Others: Images from active companies"
+							},
+							"response": []
+						},
+						{
+							"name": "Get Company Image",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/companies/company-images/{{image_id}}/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"companies",
+										"company-images",
+										"{{image_id}}",
+										""
+									]
+								},
+								"description": "Get specific company image by ID"
+							},
+							"response": []
+						},
+						{
+							"name": "Upload Company Image",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"if (pm.response.code === 201) {",
+											"    const response = pm.response.json();",
+											"    pm.collectionVariables.set('image_id', response.id);",
+											"    console.log('✅ Image ID saved:', response.id);",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "POST",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"company\": \"{{company_id}}\",\n    \"image_url\": \"https://example.com/company-office.jpg\"\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{base_url}}/companies/company-images/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"companies",
+										"company-images",
+										""
+									]
+								},
+								"description": "Upload/add company image (Company owner or Admin)"
+							},
+							"response": []
+						},
+						{
+							"name": "Update Company Image",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "PUT",
+								"header": [
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"company\": \"{{company_id}}\",\n    \"image_url\": \"https://example.com/updated-company-office.jpg\"\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{base_url}}/companies/company-images/{{image_id}}/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"companies",
+										"company-images",
+										"{{image_id}}",
+										""
+									]
+								},
+								"description": "Update company image (Company owner or Admin)"
+							},
+							"response": []
+						},
+						{
+							"name": "Delete Company Image",
+							"request": {
+								"auth": {
+									"type": "bearer",
+									"bearer": [
+										{
+											"key": "token",
+											"value": "{{access_token}}",
+											"type": "string"
+										}
+									]
+								},
+								"method": "DELETE",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/companies/company-images/{{image_id}}/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"companies",
+										"company-images",
+										"{{image_id}}",
+										""
+									]
+								},
+								"description": "Delete company image (Company owner or Admin)"
+							},
+							"response": []
+						}
+					],
+					"description": "Company image gallery management"
+				}
+			]
 		}
 	]
 }

@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from django.contrib.auth.hashers import make_password
 from .models import UserAccount
 
 class UserAccountSerializer(serializers.ModelSerializer):
@@ -29,3 +30,20 @@ class UserAccountSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError("This email is already registered")
         
         return value.lower().strip()
+    
+    def validate_password(self, value):
+        """Validate password"""
+        if len(value) < 6:
+            raise serializers.ValidationError("Password must be at least 6 characters long")
+        return value
+    
+    def create(self, validated_data):
+        """Create user with hashed password"""
+        validated_data['password'] = make_password(validated_data['password'])
+        return super().create(validated_data)
+    
+    def update(self, instance, validated_data):
+        """Update user, hash password if provided"""
+        if 'password' in validated_data:
+            validated_data['password'] = make_password(validated_data['password'])
+        return super().update(instance, validated_data)
