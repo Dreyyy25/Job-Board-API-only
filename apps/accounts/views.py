@@ -1,6 +1,6 @@
 from rest_framework import viewsets, status
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import AllowAny, IsAuthenticated, BasePermission
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.contrib.auth.hashers import make_password, check_password
@@ -9,25 +9,10 @@ from django.utils import timezone
 from .models import UserAccount
 from .serializers import UserAccountSerializer
 from .authentication import CustomJWTAuthentication
+from .permissions import IsOwnerOrAdmin
 
 # Create your views here.
 # ViewSets for CRUD operations
-#FIXME: Create and move the custom permission to a separate file
-#FIXME: Improve error handling and responses
-class IsOwnerOrAdmin(BasePermission):
-    """
-    Custom permission to only allow users to access their own account,
-    or allow admins to access all accounts.
-    """
-    def has_permission(self, request, view):
-        return request.user and request.user.is_authenticated
-    
-    def has_object_permission(self, request, view, obj):
-        if request.user.is_staff or request.user.is_superuser:
-            return True
-        
-        return obj.id == request.user.id
-
 class UserAccountViewSet(viewsets.ModelViewSet):
     """API for managing user accounts"""
     queryset = UserAccount.objects.all()
