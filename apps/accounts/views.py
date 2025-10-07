@@ -96,7 +96,6 @@ def register(request):
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 # Login endpoint
-#FIXME: last_login is null after login
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def login(request):
