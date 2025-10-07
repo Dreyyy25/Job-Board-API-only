@@ -13,9 +13,8 @@ A comprehensive REST API for a job board platform where companies can post jobs 
 ## Tech Stack
 
 - **Framework**: Django 5.2.5 + Django REST Framework 3.16.1
-- **Database**: PostgreSQL (production) / SQLite (development)
+- **Database**: PostgreSQL
 - **Authentication**: JWT (Simple JWT 5.5.1)
-- **API Format**: JSON
 
 ## Project Structure
 
@@ -34,8 +33,8 @@ jobApp/
 
 ### Prerequisites
 
-- Python 3.8+
-- PostgreSQL 12+ (optional for development)
+- Python
+- PostgreSQL 17+
 
 ### Installation
 
@@ -66,7 +65,7 @@ jobApp/
    Create a `.env` file in the project root:
    ```bash
    # Database
-   DB_NAME=jobboard_db
+   DB_NAME=your_db_name
    DB_USER=your_username
    DB_PASSWORD=your_password
    DB_HOST=localhost
@@ -74,8 +73,6 @@ jobApp/
    
    # Django
    SECRET_KEY=your-secret-key-here
-   DEBUG=True
-   ALLOWED_HOSTS=localhost,127.0.0.1
    ```
 
 5. **Run migrations**
@@ -103,10 +100,7 @@ The API will be available at: `http://localhost:8000/api/v1/`
 ### Postman Collections
 
 Import the provided Postman collections for easy API testing:
-- `Accounts API.postman_collection.json` - Authentication and user management
-- `Companies API.postman_collection.json` - Company profiles and business streams
-- `Jobs API.postman_collection.json` - Job postings and applications
-- `Seekers API.postman_collection.json` - Seeker profiles, education, experience, skills
+- `Job Board API.postman_collection.json`
 
 ## Security
 
@@ -114,14 +108,3 @@ Import the provided Postman collections for easy API testing:
 - Custom permission classes for resource access control
 - Password validation and hashing
 - CORS configuration
-- Token blacklisting on logout
-
-See [SECURITY.md](SECURITY.md) for detailed security implementation.
-
-## License
-
-[Add your license here]
-
-## Contact
-
-[Add your contact information here]
