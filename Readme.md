@@ -33,7 +33,7 @@ jobApp/
 
 ### Prerequisites
 
-- Python
+- Python 3.13.5+
 - PostgreSQL 17+
 
 ### Installation
