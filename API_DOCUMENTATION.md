@@ -54,13 +54,13 @@ Authorization: Bearer <access_token>
 | GET | `/companies/business-streams/{id}/` | Get business stream | No |
 | PUT | `/companies/business-streams/{id}/` | Update business stream | Yes (Admin) |
 | DELETE | `/companies/business-streams/{id}/` | Delete business stream | Yes (Admin) |
-| GET | `/companies/companies/` | List companies | Yes |
-| POST | `/companies/companies/` | Create company profile | Yes |
-| GET | `/companies/companies/{id}/` | Get company profile | Yes |
-| PUT | `/companies/companies/{id}/` | Update company | Yes (Owner/Admin) |
-| PATCH | `/companies/companies/{id}/` | Partial update company | Yes (Owner/Admin) |
-| DELETE | `/companies/companies/{id}/` | Delete company | Yes (Owner/Admin) |
-| GET | `/companies/companies/{id}/dashboard/` | Company dashboard | Yes (Owner/Admin) |
+| GET | `/companies/profile/` | List companies | Yes |
+| POST | `/companies/profile/` | Create company profile | Yes |
+| GET | `/companies/profile/{id}/` | Get company profile | Yes |
+| PUT | `/companies/profile/{id}/` | Update company | Yes (Owner/Admin) |
+| PATCH | `/companies/profile/{id}/` | Partial update company | Yes (Owner/Admin) |
+| DELETE | `/companies/profile/{id}/` | Delete company | Yes (Owner/Admin) |
+| GET | `/companies/dashboard/{user_id}/` | Company dashboard | Yes (Owner/Admin) |
 | GET | `/companies/company-images/` | List company images | Yes |
 | POST | `/companies/company-images/` | Upload company image | Yes (Owner/Admin) |
 | GET | `/companies/company-images/{id}/` | Get image | Yes |
@@ -76,10 +76,10 @@ Authorization: Bearer <access_token>
 | PUT | `/jobs/job-types/{id}/` | Update job type | Yes (Admin) |
 | DELETE | `/jobs/job-types/{id}/` | Delete job type | Yes (Admin) |
 | GET | `/jobs/job-locations/` | List job locations | No |
-| POST | `/jobs/job-locations/` | Create job location | Yes (Admin) |
+| POST | `/jobs/job-locations/` | Create job location | Yes |
 | GET | `/jobs/job-locations/{id}/` | Get job location | No |
-| PUT | `/jobs/job-locations/{id}/` | Update job location | Yes (Admin) |
-| DELETE | `/jobs/job-locations/{id}/` | Delete job location | Yes (Admin) |
+| PUT | `/jobs/job-locations/{id}/` | Update job location | Yes |
+| DELETE | `/jobs/job-locations/{id}/` | Delete job location | Yes |
 | GET | `/jobs/job-posts/` | List/search jobs | No |
 | POST | `/jobs/job-posts/` | Create job post | Yes (Company) |
 | GET | `/jobs/job-posts/{id}/` | Get job details | No |
@@ -332,7 +332,7 @@ Authorization: Bearer <access-token>
 
 ### 17. Create Company Profile
 ```http
-POST /api/v1/companies/companies/
+POST /api/v1/companies/profile/
 Authorization: Bearer <access-token>
 Content-Type: application/json
 
@@ -351,19 +351,19 @@ Content-Type: application/json
 
 ### 18. List Companies
 ```http
-GET /api/v1/companies/companies/
+GET /api/v1/companies/profile/
 Authorization: Bearer <access-token>
 ```
 
 ### 19. Get Company Profile
 ```http
-GET /api/v1/companies/companies/{id}/
+GET /api/v1/companies/profile/{id}/
 Authorization: Bearer <access-token>
 ```
 
 ### 20. Update Company Profile
 ```http
-PUT /api/v1/companies/companies/{id}/
+PUT /api/v1/companies/profile/{id}/
 Authorization: Bearer <access-token>
 Content-Type: application/json
 
@@ -380,7 +380,7 @@ Content-Type: application/json
 
 ### 21. Partial Update Company
 ```http
-PATCH /api/v1/companies/companies/{id}/
+PATCH /api/v1/companies/profile/{id}/
 Authorization: Bearer <access-token>
 Content-Type: application/json
 
@@ -392,7 +392,7 @@ Content-Type: application/json
 
 ### 22. Delete Company
 ```http
-DELETE /api/v1/companies/companies/{id}/
+DELETE /api/v1/companies/profile/{id}/
 Authorization: Bearer <access-token>
 ```
 
@@ -508,7 +508,7 @@ DELETE /api/v1/jobs/job-types/{id}/
 Authorization: Bearer <access-token>
 ```
 
-### 34. Create Job Location (Admin Only)
+### 34. Create Job Location
 ```http
 POST /api/v1/jobs/job-locations/
 Authorization: Bearer <access-token>
@@ -533,7 +533,7 @@ GET /api/v1/jobs/job-locations/
 GET /api/v1/jobs/job-locations/{id}/
 ```
 
-### 37. Update Job Location (Admin Only)
+### 37. Update Job Location
 ```http
 PUT /api/v1/jobs/job-locations/{id}/
 Authorization: Bearer <access-token>
@@ -548,7 +548,7 @@ Content-Type: application/json
 }
 ```
 
-### 38. Delete Job Location (Admin Only)
+### 38. Delete Job Location
 ```http
 DELETE /api/v1/jobs/job-locations/{id}/
 Authorization: Bearer <access-token>
