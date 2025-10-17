@@ -4,7 +4,7 @@ from . import views
 
 router = DefaultRouter()
 router.register(r'business-streams', views.BusinessStreamViewSet)
-router.register(r'companies', views.CompanyViewSet)
+router.register(r'profile', views.CompanyViewSet)
 router.register(r'company-images', views.CompanyImagesViewSet)
 
 urlpatterns = [
