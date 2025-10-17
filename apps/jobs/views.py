@@ -33,12 +33,13 @@ class JobLocationViewSet(viewsets.ModelViewSet):
     """
     API for job locations.
     - Everyone can view locations
-    - Only admins can create/update/delete locations
+    - Authenticated users (companies) can create locations
+    - Admins can manage all locations
     """
     queryset = JobLocation.objects.all()
     serializer_class = JobLocationSerializer
     authentication_classes = [CustomJWTAuthentication]
-    permission_classes = [IsAdminOrReadOnly]
+    permission_classes = [IsAuthenticated]
 
 
 class JobPostViewSet(viewsets.ModelViewSet):
