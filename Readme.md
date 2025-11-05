@@ -68,8 +68,8 @@ jobApp/
    DB_NAME=your_db_name
    DB_USER=your_username
    DB_PASSWORD=your_password
-   DB_HOST=localhost
-   DB_PORT=5432
+   DB_HOST=your_db_host #by default: localhost
+   DB_PORT=your_db_port #by default: 5432
    
    # Django
    SECRET_KEY=your-secret-key-here
