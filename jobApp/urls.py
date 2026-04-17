@@ -14,12 +14,12 @@ Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
+import os
+
 from django.contrib import admin
 from django.urls import path, include
 
-from jobApp import settings
-
-admin_url = 'secure-admin/' if settings.DEBUG else 'admin-secure/'
+admin_url = os.getenv("ADMIN_URL", "admin/")
 
 urlpatterns = [
     path(admin_url, admin.site.urls),

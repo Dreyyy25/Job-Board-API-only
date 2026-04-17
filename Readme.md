@@ -73,6 +73,11 @@ jobApp/
    
    # Django
    SECRET_KEY=your-secret-key-here
+
+   # Deployment
+   DEBUG=true
+   ALLOWED_HOSTS=localhost,127.0.0.1
+   ADMIN_URL=admin/
    ```
 
 5. **Run migrations**
