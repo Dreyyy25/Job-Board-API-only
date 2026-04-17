@@ -26,7 +26,8 @@ jobApp/
 │   ├── seekers/      # Job seeker profiles, education, experience, skills
 │   └── jobs/         # Job postings, applications, and requirements
 ├── jobApp/           # Django project settings
-└── requirements.txt  # Dependencies
+├── config.py         # Centralized env-var access (imported by settings)
+└── pyproject.toml    # Dependencies (managed by uv)
 ```
 
 ## Quick Start
@@ -44,25 +45,30 @@ jobApp/
    cd jobApp
    ```
 
-2. **Create and activate virtual environment**
+2. **Install dependencies with [uv](https://docs.astral.sh/uv/)**
+
+   If you don't have uv installed yet, see the [install guide](https://docs.astral.sh/uv/getting-started/installation/).
+
    ```bash
-   python -m venv venv
-   
-   # Windows
-   venv\Scripts\activate
-   
+   uv sync
+   ```
+
+   This reads `pyproject.toml` + `uv.lock`, provisions Python 3.13 (pinned in `.python-version`), creates `.venv/`, and installs all dependencies.
+
+   Activate the venv or prefix commands with `uv run`:
+
+   ```bash
+   # Windows (PowerShell)
+   .venv\Scripts\activate
+
    # macOS/Linux
-   source venv/bin/activate
+   source .venv/bin/activate
    ```
 
-3. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
+3. **Set up environment variables**
 
-4. **Set up environment variables**
-   
-   Create a `.env` file in the project root:
+   Create a `.env` file in the project root. All values in this file are read by `config.py` and injected into Django settings:
+
    ```bash
    # Database
    DB_NAME=your_db_name
@@ -70,7 +76,7 @@ jobApp/
    DB_PASSWORD=your_password
    DB_HOST=your_db_host #by default: localhost
    DB_PORT=your_db_port #by default: 5432
-   
+
    # Django
    SECRET_KEY=your-secret-key-here
 
@@ -80,20 +86,20 @@ jobApp/
    ADMIN_URL=admin/
    ```
 
-5. **Run migrations**
+4. **Run migrations**
    ```bash
-   python manage.py makemigrations
-   python manage.py migrate
+   uv run python manage.py makemigrations
+   uv run python manage.py migrate
    ```
 
-6. **Create superuser**
+5. **Create superuser**
    ```bash
-   python manage.py createsuperuser
+   uv run python manage.py createsuperuser
    ```
 
-7. **Start development server**
+6. **Start development server**
    ```bash
-   python manage.py runserver
+   uv run python manage.py runserver
    ```
 
 The API will be available at: `http://localhost:8000/api/v1/`

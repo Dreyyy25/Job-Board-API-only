@@ -4,23 +4,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-Run from the repository root (where `manage.py` lives). Activate the virtualenv first (`venv\Scripts\activate` on Windows, `source venv/bin/activate` otherwise).
+Run from the repository root (where `manage.py` lives). Dependencies are managed by **uv** (Python 3.13 pinned via `.python-version`). Either activate the venv (`.venv\Scripts\activate` on Windows, `source .venv/bin/activate` otherwise) or prefix commands with `uv run`.
 
-- Install deps: `pip install -r requirements.txt`
-- Run dev server: `python manage.py runserver` (API served at `http://localhost:8000/api/v1/`)
-- Make migrations: `python manage.py makemigrations`
-- Apply migrations: `python manage.py migrate`
-- Create superuser: `python manage.py createsuperuser` (prompts for `email` + `user_type`; superusers default to `user_type='company'`)
-- Run all tests: `python manage.py test`
-- Run tests for one app: `python manage.py test apps.jobs`
-- Run a single test: `python manage.py test apps.jobs.tests.TestClassName.test_method`
-- Django shell: `python manage.py shell`
+- Install / sync deps: `uv sync`
+- Add a dependency: `uv add <package>` (writes to `pyproject.toml` + `uv.lock`)
+- Run dev server: `uv run python manage.py runserver` (API served at `http://localhost:8000/api/v1/`)
+- Make migrations: `uv run python manage.py makemigrations`
+- Apply migrations: `uv run python manage.py migrate`
+- Create superuser: `uv run python manage.py createsuperuser` (prompts for `email` + `user_type`; superusers default to `user_type='company'`)
+- Run all tests: `uv run python manage.py test`
+- Run tests for one app: `uv run python manage.py test apps.jobs`
+- Run a single test: `uv run python manage.py test apps.jobs.tests.TestClassName.test_method`
+- Django shell: `uv run python manage.py shell`
 
-A `.env` file is required at the repo root. Required keys: `SECRET_KEY`, `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT` (see `.env.example`). `SECRET_KEY` is read with `os.environ[...]` — the app will crash on startup if it's missing. PostgreSQL is required (not SQLite).
+A `.env` file is required at the repo root. Required keys: `SECRET_KEY`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` (required); `DB_HOST`, `DB_PORT`, `DEBUG`, `ALLOWED_HOSTS`, `ADMIN_URL` (optional, see `.env.example`). `SECRET_KEY`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD` are read via `os.environ[...]` in `config.py` — the app crashes at import time if any of them are missing. PostgreSQL is required (not SQLite).
+
+All env access goes through `config.py` at the repo root. `jobApp/settings.py` and `jobApp/urls.py` import plain Python constants from it. Do **not** add new `os.getenv()` calls scattered through the codebase — extend `config.py` instead.
 
 ## Architecture
 
-Django 5.2 + DRF monolith with JWT auth. Four domain apps under `apps/`, each mounted under `/api/v1/<app>/` by `jobApp/urls.py`. The admin URL is `secure-admin/` when `DEBUG=True` and `admin-secure/` otherwise.
+Django 5.2 + DRF monolith with JWT auth. Four domain apps under `apps/`, each mounted under `/api/v1/<app>/` by `jobApp/urls.py`. The admin URL path is read from the `ADMIN_URL` env var (default `admin/`).
 
 ### Custom user model — the center of everything
 
