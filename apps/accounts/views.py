@@ -1,13 +1,16 @@
 from rest_framework import viewsets, status
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, throttle_classes
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.exceptions import TokenError
+from rest_framework_simplejwt.tokens import RefreshToken as SimpleJWTRefreshToken
 from django.contrib.auth.hashers import make_password, check_password
 from django.utils import timezone
 
 from .models import UserAccount
-from .serializers import UserAccountSerializer
+from .serializers import UserAccountSerializer, RegisterSerializer
 from .authentication import CustomJWTAuthentication
 from .permissions import IsOwnerOrAdmin
 
@@ -54,35 +57,34 @@ class UserAccountViewSet(viewsets.ModelViewSet):
 # Registration endpoint
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@throttle_classes([ScopedRateThrottle])
 def register(request):
     """Register a new user account"""
-    serializer = UserAccountSerializer(data=request.data)
+    serializer = RegisterSerializer(data=request.data)
     if serializer.is_valid():
-        user = serializer.save()  # Password hashing handled by serializer
-        
-        # Generate tokens using built-in RefreshToken
+        user = serializer.save()
         refresh = RefreshToken.for_user(user)
         refresh['user_id'] = str(user.id)
         refresh['email'] = user.email
         refresh['user_type'] = user.user_type
-        
         return Response({
             'message': 'User created successfully',
             'user': {
                 'id': str(user.id),
                 'email': user.email,
-                'user_type': user.user_type
+                'user_type': user.user_type,
             },
             'tokens': {
                 'refresh': str(refresh),
                 'access': str(refresh.access_token),
-            }
+            },
         }, status=status.HTTP_201_CREATED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 # Login endpoint
 @api_view(['POST'])
 @permission_classes([AllowAny])
+@throttle_classes([ScopedRateThrottle])
 def login(request):
     """Login for UserAccount model"""
     email = request.data.get('email')
@@ -146,3 +148,23 @@ def me(request):
                 serializer.save()
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+# Logout endpoint
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def logout(request):
+    """Blacklist the supplied refresh token."""
+    token = request.data.get('refresh')
+    if not token:
+        return Response({'error': 'refresh token required'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    try:
+        SimpleJWTRefreshToken(token).blacklist()
+    except TokenError:
+        return Response({'error': 'invalid or expired refresh token'},
+                        status=status.HTTP_400_BAD_REQUEST)
+    return Response(status=status.HTTP_205_RESET_CONTENT)
+
+
+register.throttle_scope = 'register'
+login.throttle_scope = 'login'

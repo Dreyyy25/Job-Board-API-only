@@ -1,19 +1,27 @@
 from rest_framework import serializers
 from django.contrib.auth.hashers import make_password
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from .models import UserAccount
 
 class UserAccountSerializer(serializers.ModelSerializer):
     class Meta:
         model = UserAccount
-        fields = '__all__'
-        extra_kwargs = {
-            'password': {'write_only': True}
-        }
-    
+        fields = [
+            'id', 'email', 'password', 'user_type',
+            'date_of_birth', 'contact_number', 'sex', 'user_image_url',
+            'is_active', 'last_login', 'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'is_active', 'last_login', 'created_at', 'updated_at']
+        extra_kwargs = {'password': {'write_only': True, 'required': False}}
+
     def validate_user_type(self, value):
-        """Validate user_type field"""
         if value not in ['job_seeker', 'company']:
-            raise serializers.ValidationError("Invalid user type. Must be 'job_seeker' or 'company'")
+            raise serializers.ValidationError(
+                "Invalid user type. Must be 'job_seeker' or 'company'"
+            )
+        if self.instance and self.instance.user_type != value:
+            raise serializers.ValidationError("user_type cannot be changed")
         return value
     
     def validate_email(self, value):
@@ -32,9 +40,10 @@ class UserAccountSerializer(serializers.ModelSerializer):
         return value.lower().strip()
     
     def validate_password(self, value):
-        """Validate password"""
-        if len(value) < 6:
-            raise serializers.ValidationError("Password must be at least 6 characters long")
+        try:
+            validate_password(value)
+        except DjangoValidationError as e:
+            raise serializers.ValidationError(list(e.messages))
         return value
     
     def create(self, validated_data):
@@ -47,3 +56,39 @@ class UserAccountSerializer(serializers.ModelSerializer):
         if 'password' in validated_data:
             validated_data['password'] = make_password(validated_data['password'])
         return super().update(instance, validated_data)
+
+
+class RegisterSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserAccount
+        fields = [
+            'email', 'password', 'user_type',
+            'date_of_birth', 'contact_number', 'sex', 'user_image_url',
+        ]
+        extra_kwargs = {
+            'password': {'write_only': True},
+            'user_type': {'required': True},
+        }
+
+    def validate_user_type(self, value):
+        if value not in ['job_seeker', 'company']:
+            raise serializers.ValidationError(
+                "Invalid user type. Must be 'job_seeker' or 'company'"
+            )
+        return value
+
+    def validate_email(self, value):
+        if UserAccount.objects.filter(email=value).exists():
+            raise serializers.ValidationError("This email is already registered")
+        return value.lower().strip()
+
+    def validate_password(self, value):
+        try:
+            validate_password(value)
+        except DjangoValidationError as e:
+            raise serializers.ValidationError(list(e.messages))
+        return value
+
+    def create(self, validated_data):
+        validated_data['password'] = make_password(validated_data['password'])
+        return super().create(validated_data)
