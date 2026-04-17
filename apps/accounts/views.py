@@ -1,6 +1,6 @@
 from rest_framework import viewsets, status
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
-from rest_framework.throttling import ScopedRateThrottle
+from rest_framework.throttling import AnonRateThrottle
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -13,6 +13,14 @@ from .models import UserAccount
 from .serializers import UserAccountSerializer, RegisterSerializer
 from .authentication import CustomJWTAuthentication
 from .permissions import IsOwnerOrAdmin
+
+
+class RegisterThrottle(AnonRateThrottle):
+    scope = 'register'
+
+
+class LoginThrottle(AnonRateThrottle):
+    scope = 'login'
 
 # Create your views here.
 # ViewSets for CRUD operations
@@ -57,7 +65,7 @@ class UserAccountViewSet(viewsets.ModelViewSet):
 # Registration endpoint
 @api_view(['POST'])
 @permission_classes([AllowAny])
-@throttle_classes([ScopedRateThrottle])
+@throttle_classes([RegisterThrottle])
 def register(request):
     """Register a new user account"""
     serializer = RegisterSerializer(data=request.data)
@@ -84,7 +92,7 @@ def register(request):
 # Login endpoint
 @api_view(['POST'])
 @permission_classes([AllowAny])
-@throttle_classes([ScopedRateThrottle])
+@throttle_classes([LoginThrottle])
 def login(request):
     """Login for UserAccount model"""
     email = request.data.get('email')
@@ -164,7 +172,3 @@ def logout(request):
         return Response({'error': 'invalid or expired refresh token'},
                         status=status.HTTP_400_BAD_REQUEST)
     return Response(status=status.HTTP_205_RESET_CONTENT)
-
-
-register.throttle_scope = 'register'
-login.throttle_scope = 'login'

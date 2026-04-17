@@ -54,7 +54,15 @@ class CompanyViewSet(viewsets.ModelViewSet):
             return Company.objects.filter(status='active')
     
     def perform_create(self, serializer):
-        """Automatically assign the current user as the company owner"""
+        """Automatically assign the current user as the company owner.
+
+        Only users with user_type='company' may create companies — the
+        Company.user_account FK limit_choices_to is only enforced in
+        admin forms, not the ORM, so we guard here explicitly.
+        """
+        if self.request.user.user_type != 'company':
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("Only company users can create companies")
         serializer.save(user_account=self.request.user)
 
 
