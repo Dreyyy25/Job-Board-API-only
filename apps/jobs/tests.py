@@ -1,6 +1,9 @@
 from rest_framework.test import APITestCase
 from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
+from django.db import connection
+from django.test import override_settings
+from django.test.utils import CaptureQueriesContext
 from apps.accounts.models import UserAccount
 from apps.companies.models import BusinessStream, Company
 from apps.jobs.models import JobType, JobLocation, JobPost
@@ -121,3 +124,115 @@ class ApplicationTests(APITestCase):
         payload = {"user_account": str(self.other_seeker.id), "job_post": str(self.job.id)}
         r = self.client.post("/api/v1/jobs/apply/", payload, format="json")
         self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class PaginationTests(APITestCase):
+    def setUp(self):
+        for i in range(25):
+            JobType.objects.create(job_type_name=f"Type {i}")
+
+    def test_list_paginates_by_default(self):
+        r = self.client.get("/api/v1/jobs/job-types/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data["count"], 25)
+        self.assertEqual(len(r.data["results"]), 20)
+        self.assertIsNotNone(r.data["next"])
+
+    def test_custom_page_size(self):
+        r = self.client.get("/api/v1/jobs/job-types/?page_size=5")
+        self.assertEqual(len(r.data["results"]), 5)
+
+    def test_page_size_cap(self):
+        r = self.client.get("/api/v1/jobs/job-types/?page_size=500")
+        self.assertLessEqual(len(r.data["results"]), 100)
+
+
+class JobPostFilterTests(APITestCase):
+    def setUp(self):
+        owner = UserAccount.objects.create_user(
+            email="filt-owner@example.com",
+            password="Str0ng-Password!",
+            user_type="company",
+        )
+        stream = BusinessStream.objects.create(business_stream_name="Filt Tech")
+        company = Company.objects.create(
+            user_account=owner, company_name="FiltCo", business_stream=stream)
+        self.ft = JobType.objects.create(job_type_name="FiltFT")
+        self.pt = JobType.objects.create(job_type_name="FiltPT")
+        self.manila = JobLocation.objects.create(city="Manila", country="PH")
+        self.cebu = JobLocation.objects.create(city="Cebu", country="PH")
+        self.tokyo = JobLocation.objects.create(city="Tokyo", country="JP")
+
+        JobPost.objects.create(
+            company=company, job_type=self.ft, job_location=self.manila,
+            job_title="Senior Developer", job_description="python",
+            salary_min=1000, salary_max=5000)
+        JobPost.objects.create(
+            company=company, job_type=self.pt, job_location=self.cebu,
+            job_title="Junior Dev", job_description="...",
+            salary_min=500, salary_max=1500)
+        JobPost.objects.create(
+            company=company, job_type=self.ft, job_location=self.tokyo,
+            job_title="Staff Engineer", job_description="leadership",
+            salary_min=8000, salary_max=12000)
+
+    def _titles(self, response):
+        return sorted(j["job_title"] for j in response.data["results"])
+
+    def test_filter_by_job_type(self):
+        r = self.client.get(f"/api/v1/jobs/job-posts/?job_type={self.ft.id}")
+        self.assertEqual(self._titles(r), ["Senior Developer", "Staff Engineer"])
+
+    def test_filter_by_city(self):
+        r = self.client.get("/api/v1/jobs/job-posts/?city=manila")
+        self.assertEqual(self._titles(r), ["Senior Developer"])
+
+    def test_filter_by_salary_range(self):
+        r = self.client.get(
+            "/api/v1/jobs/job-posts/?salary_min_gte=1000&salary_max_lte=5000"
+        )
+        self.assertEqual(self._titles(r), ["Senior Developer"])
+
+    def test_search_by_title(self):
+        r = self.client.get("/api/v1/jobs/job-posts/?search=developer")
+        # "developer" matches "Senior Developer" and "Junior Dev" only if
+        # the word is present — assert the senior match explicitly.
+        titles = [j["job_title"] for j in r.data["results"]]
+        self.assertIn("Senior Developer", titles)
+        self.assertNotIn("Staff Engineer", titles)
+
+    def test_ordering_by_salary_max_desc(self):
+        r = self.client.get("/api/v1/jobs/job-posts/?ordering=-salary_max")
+        titles = [j["job_title"] for j in r.data["results"]]
+        self.assertEqual(titles[0], "Staff Engineer")
+
+
+QUERY_BUDGET = 10  # ceiling; tune downward as prefetches are added
+
+
+class JobPostQueryCountTests(APITestCase):
+    def setUp(self):
+        owner = UserAccount.objects.create_user(
+            email="qc-owner@example.com",
+            password="Str0ng-Password!",
+            user_type="company",
+        )
+        stream = BusinessStream.objects.create(business_stream_name="QC Tech")
+        company = Company.objects.create(
+            user_account=owner, company_name="QCCo", business_stream=stream)
+        jt = JobType.objects.create(job_type_name="QC FT")
+        loc = JobLocation.objects.create(city="QCity", country="PH")
+        for i in range(50):
+            JobPost.objects.create(
+                company=company, job_type=jt, job_location=loc,
+                job_title=f"Job {i}", job_description="...")
+
+    def test_job_post_list_query_count(self):
+        with CaptureQueriesContext(connection) as ctx:
+            r = self.client.get("/api/v1/jobs/job-posts/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data["count"], 50)
+        self.assertLessEqual(
+            len(ctx), QUERY_BUDGET,
+            f"Query count {len(ctx)} exceeds budget {QUERY_BUDGET}",
+        )

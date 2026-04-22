@@ -2,8 +2,10 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from django.db.models import Q
+from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework.filters import SearchFilter, OrderingFilter
 from apps.accounts.authentication import CustomJWTAuthentication
+from .filters import JobPostFilter
 from .models import JobType, JobLocation, JobPost, JobPostActivity, JobPostSkillSet
 from .serializers import (
     JobTypeSerializer, JobLocationSerializer, JobPostSerializer,
@@ -53,7 +55,12 @@ class JobPostViewSet(viewsets.ModelViewSet):
     serializer_class = JobPostSerializer
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [IsJobPosterOrAdmin]
-    
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_class = JobPostFilter
+    search_fields = ['job_title', 'job_description', 'company__company_name']
+    ordering_fields = ['created_at', 'salary_max', 'salary_min', 'deadline_date']
+    ordering = ['-created_at']
+
     def get_queryset(self):
         """
         Filter queryset based on user type:
@@ -62,8 +69,15 @@ class JobPostViewSet(viewsets.ModelViewSet):
         - Others see only published, active jobs
         """
         user = self.request.user
-        queryset = JobPost.objects.all()
-        
+        queryset = (
+            JobPost.objects
+            .select_related(
+                'company', 'company__business_stream',
+                'job_type', 'job_location',
+            )
+            .prefetch_related('required_skills__skill_set')
+        )
+
         # Admins see everything
         if user.is_staff or user.is_superuser:
             pass  # Return all jobs
@@ -73,20 +87,7 @@ class JobPostViewSet(viewsets.ModelViewSet):
         # Others see only published, active jobs
         else:
             queryset = queryset.filter(is_published=True, is_active=True)
-        
-        # Search functionality
-        search = self.request.query_params.get('search', None)
-        if search:
-            queryset = queryset.filter(
-                Q(job_title__icontains=search) |
-                Q(job_description__icontains=search)
-            )
-        
-        # Filter by location
-        city = self.request.query_params.get('city', None)
-        if city:
-            queryset = queryset.filter(job_location__city__icontains=city)
-            
+
         return queryset
     
     def perform_create(self, serializer):
@@ -128,15 +129,17 @@ class JobPostActivityViewSet(viewsets.ModelViewSet):
         - Company users see applications to their jobs
         """
         user = self.request.user
-        
+        base = JobPostActivity.objects.select_related(
+            'user_account', 'job_post', 'job_post__company',
+        )
         if user.is_staff or user.is_superuser:
-            return JobPostActivity.objects.all()
+            return base
         elif user.user_type == 'job_seeker':
-            return JobPostActivity.objects.filter(user_account=user)
+            return base.filter(user_account=user)
         elif user.user_type == 'company':
-            return JobPostActivity.objects.filter(job_post__company__user_account=user)
+            return base.filter(job_post__company__user_account=user)
         else:
-            return JobPostActivity.objects.none()
+            return base.none()
 
 
 class JobPostSkillSetViewSet(viewsets.ModelViewSet):
@@ -159,13 +162,13 @@ class JobPostSkillSetViewSet(viewsets.ModelViewSet):
         - Others see skills for published jobs
         """
         user = self.request.user
-        
+        base = JobPostSkillSet.objects.select_related('job_post', 'skill_set')
         if user.is_staff or user.is_superuser:
-            return JobPostSkillSet.objects.all()
+            return base
         elif user.is_authenticated and user.user_type == 'company':
-            return JobPostSkillSet.objects.filter(job_post__company__user_account=user)
+            return base.filter(job_post__company__user_account=user)
         else:
-            return JobPostSkillSet.objects.filter(job_post__is_published=True)
+            return base.filter(job_post__is_published=True)
 
 
 @api_view(['POST'])

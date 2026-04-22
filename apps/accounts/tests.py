@@ -137,3 +137,72 @@ class ThrottleTests(APITestCase):
             "user_type": "job_seeker",
         }, format="json")
         self.assertEqual(r6.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+
+
+from django.test import override_settings
+
+
+@override_settings(
+    CORS_ALLOWED_ORIGINS=["http://localhost:3000"],
+    CORS_ALLOW_ALL_ORIGINS=False,
+)
+class CorsTests(APITestCase):
+    def test_cors_preflight_from_allowed_origin(self):
+        r = self.client.options(
+            "/api/v1/accounts/login/",
+            HTTP_ORIGIN="http://localhost:3000",
+            HTTP_ACCESS_CONTROL_REQUEST_METHOD="POST",
+        )
+        self.assertEqual(r.headers.get("Access-Control-Allow-Origin"),
+                         "http://localhost:3000")
+
+    def test_cors_preflight_from_disallowed_origin(self):
+        r = self.client.options(
+            "/api/v1/accounts/login/",
+            HTTP_ORIGIN="http://evil.example.com",
+            HTTP_ACCESS_CONTROL_REQUEST_METHOD="POST",
+        )
+        self.assertNotIn("Access-Control-Allow-Origin", r.headers)
+
+
+class SecurityHeaderTests(APITestCase):
+    def test_x_frame_options_deny(self):
+        r = self.client.get("/api/v1/accounts/register/")
+        self.assertEqual(r.headers.get("X-Frame-Options"), "DENY")
+
+    def test_content_type_nosniff(self):
+        r = self.client.get("/api/v1/accounts/register/")
+        self.assertEqual(r.headers.get("X-Content-Type-Options"), "nosniff")
+
+    def test_referrer_policy_same_origin(self):
+        r = self.client.get("/api/v1/accounts/register/")
+        self.assertEqual(r.headers.get("Referrer-Policy"), "same-origin")
+
+    @override_settings(SECURE_HSTS_SECONDS=3600, SECURE_SSL_REDIRECT=False)
+    def test_hsts_header_present_when_configured(self):
+        # SecurityMiddleware only sets HSTS on HTTPS requests;
+        # APIClient can simulate that via HTTPS=on / wsgi.url_scheme.
+        r = self.client.get("/api/v1/accounts/register/", secure=True)
+        self.assertIn("max-age=3600", r.headers.get("Strict-Transport-Security", ""))
+
+
+from django.conf import settings as django_settings
+
+
+class SettingsModuleTests(APITestCase):
+    """Verify we're running under the test settings module."""
+
+    def test_debug_is_false(self):
+        self.assertFalse(django_settings.DEBUG)
+
+    def test_password_hasher_is_md5(self):
+        self.assertTrue(
+            django_settings.PASSWORD_HASHERS[0].endswith('MD5PasswordHasher'),
+            f"Expected MD5 hasher, got {django_settings.PASSWORD_HASHERS[0]}",
+        )
+
+    def test_ssl_redirect_off_in_tests(self):
+        self.assertFalse(django_settings.SECURE_SSL_REDIRECT)
+
+    def test_testserver_in_allowed_hosts(self):
+        self.assertIn('testserver', django_settings.ALLOWED_HOSTS)

@@ -60,3 +60,42 @@ class CompanyPermissionTests(APITestCase):
         }, format="json")
         self.assertIn(r.status_code,
                       (status.HTTP_403_FORBIDDEN, status.HTTP_400_BAD_REQUEST))
+
+
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
+
+from apps.companies.models import CompanyImages
+
+
+COMPANY_QUERY_BUDGET = 10
+
+
+class CompanyQueryCountTests(APITestCase):
+    def setUp(self):
+        self.seeker = UserAccount.objects.create_user(
+            email="qc-seeker@example.com",
+            password="Str0ng-Password!",
+            user_type="job_seeker",
+        )
+        stream = BusinessStream.objects.create(business_stream_name="QC Finance")
+        for i in range(30):
+            owner = UserAccount.objects.create_user(
+                email=f"qc-co{i}@example.com",
+                password="Str0ng-Password!",
+                user_type="company",
+            )
+            co = Company.objects.create(
+                user_account=owner, company_name=f"Co {i}", business_stream=stream)
+            CompanyImages.objects.create(company=co, image_url="https://x.invalid/a.png")
+
+    def test_company_list_query_count(self):
+        token = RefreshToken.for_user(self.seeker)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token.access_token}")
+        with CaptureQueriesContext(connection) as ctx:
+            r = self.client.get("/api/v1/companies/profile/")
+        self.assertEqual(r.status_code, 200)
+        self.assertLessEqual(
+            len(ctx), COMPANY_QUERY_BUDGET,
+            f"Query count {len(ctx)} exceeds budget {COMPANY_QUERY_BUDGET}",
+        )

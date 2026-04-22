@@ -44,14 +44,17 @@ class CompanyViewSet(viewsets.ModelViewSet):
         - Job seekers see all active companies
         """
         user = self.request.user
-        
+        base = (
+            Company.objects
+            .select_related('user_account', 'business_stream')
+            .prefetch_related('images')
+        )
         if user.is_staff or user.is_superuser:
-            return Company.objects.all()
+            return base
         elif user.user_type == 'company':
-            return Company.objects.filter(user_account=user)
+            return base.filter(user_account=user)
         else:
-            # Job seekers see only active companies
-            return Company.objects.filter(status='active')
+            return base.filter(status='active')
     
     def perform_create(self, serializer):
         """Automatically assign the current user as the company owner.
@@ -86,13 +89,13 @@ class CompanyImagesViewSet(viewsets.ModelViewSet):
         - Others see images from active companies
         """
         user = self.request.user
-        
+        base = CompanyImages.objects.select_related('company', 'company__user_account')
         if user.is_staff or user.is_superuser:
-            return CompanyImages.objects.all()
+            return base
         elif user.user_type == 'company':
-            return CompanyImages.objects.filter(company__user_account=user)
+            return base.filter(company__user_account=user)
         else:
-            return CompanyImages.objects.filter(company__status='active')
+            return base.filter(company__status='active')
 
 
 @api_view(['GET'])

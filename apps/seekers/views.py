@@ -36,15 +36,16 @@ class SeekerProfileViewSet(viewsets.ModelViewSet):
         """
         user = self.request.user
         
+        base = SeekerProfile.objects.select_related('user_account')
         if user.is_staff or user.is_superuser:
-            return SeekerProfile.objects.all()
+            return base
         elif user.user_type == 'job_seeker':
-            return SeekerProfile.objects.filter(user_account=user)
+            return base.filter(user_account=user)
         elif user.user_type == 'company':
             # Companies can view all seeker profiles
-            return SeekerProfile.objects.all()
+            return base
         else:
-            return SeekerProfile.objects.none()
+            return base.none()
     
     def perform_create(self, serializer):
         """Automatically assign the current user as the profile owner"""
@@ -72,14 +73,15 @@ class EducationDataViewSet(viewsets.ModelViewSet):
         """
         user = self.request.user
         
+        base = EducationData.objects.select_related('user_account')
         if user.is_staff or user.is_superuser:
-            return EducationData.objects.all()
+            return base
         elif user.user_type == 'job_seeker':
-            return EducationData.objects.filter(user_account=user)
+            return base.filter(user_account=user)
         elif user.user_type == 'company':
-            return EducationData.objects.all()
+            return base
         else:
-            return EducationData.objects.none()
+            return base.none()
     
     def perform_create(self, serializer):
         """Automatically assign the current user"""
@@ -107,14 +109,15 @@ class ExperienceDataViewSet(viewsets.ModelViewSet):
         """
         user = self.request.user
         
+        base = ExperienceData.objects.select_related('user_account')
         if user.is_staff or user.is_superuser:
-            return ExperienceData.objects.all()
+            return base
         elif user.user_type == 'job_seeker':
-            return ExperienceData.objects.filter(user_account=user)
+            return base.filter(user_account=user)
         elif user.user_type == 'company':
-            return ExperienceData.objects.all()
+            return base
         else:
-            return ExperienceData.objects.none()
+            return base.none()
     
     def perform_create(self, serializer):
         """Automatically assign the current user"""
@@ -154,14 +157,15 @@ class SeekerSkillSetViewSet(viewsets.ModelViewSet):
         """
         user = self.request.user
         
+        base = SeekerSkillSet.objects.select_related('user_account', 'skill_set')
         if user.is_staff or user.is_superuser:
-            return SeekerSkillSet.objects.all()
+            return base
         elif user.user_type == 'job_seeker':
-            return SeekerSkillSet.objects.filter(user_account=user)
+            return base.filter(user_account=user)
         elif user.user_type == 'company':
-            return SeekerSkillSet.objects.all()
+            return base
         else:
-            return SeekerSkillSet.objects.none()
+            return base.none()
     
     def perform_create(self, serializer):
         """Automatically assign the current user"""
