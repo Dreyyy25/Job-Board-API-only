@@ -86,6 +86,22 @@ jobApp/
    ADMIN_URL=admin/
    ```
 
+   **Picking a settings module**
+
+   The settings package exposes three environment modules:
+
+   | Module | When used |
+   | --- | --- |
+   | `jobApp.settings.development` | Default for `manage.py` (except `test`). DEBUG=True, loose CORS, no HTTPS redirect. |
+   | `jobApp.settings.production` | Default for `wsgi.py` / `asgi.py`. DEBUG=False, strict security, fail-fast assertions. |
+   | `jobApp.settings.test` | Auto-picked when running `manage.py test`. Fast MD5 hasher, ALLOWED_HOSTS locked to `testserver`. |
+
+   Override with `DJANGO_SETTINGS_MODULE`:
+
+   ```bash
+   DJANGO_SETTINGS_MODULE=jobApp.settings.production uv run python manage.py migrate
+   ```
+
 4. **Run migrations**
    ```bash
    uv run python manage.py makemigrations
@@ -112,6 +128,29 @@ The API will be available at: `http://localhost:8000/api/v1/`
 
 Import the provided Postman collections for easy API testing:
 - `Job Board API.postman_collection.json`
+
+## API Conventions
+
+### Pagination
+
+All list endpoints return:
+
+```json
+{
+  "count": 123,
+  "next": "http://host/api/v1/jobs/job-posts/?page=2",
+  "previous": null,
+  "results": [/* items */]
+}
+```
+
+Override the page size with `?page_size=N` (max 100).
+
+### Search, filter, ordering (jobs)
+
+- `?search=<term>` — matches job title, description, and company name
+- `?ordering=-created_at` — sort; valid fields: `created_at`, `salary_max`, `salary_min`, `deadline_date`
+- Filters: `job_type`, `company`, `salary_type`, `is_published`, `city`, `country`, `salary_min_gte`, `salary_max_lte`, `deadline_before`, `required_skill`
 
 ## Security
 

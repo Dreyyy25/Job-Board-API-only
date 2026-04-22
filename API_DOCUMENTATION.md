@@ -1235,5 +1235,5 @@ Each collection includes:
 - Dates use `YYYY-MM-DD` format
 - DateTimes use ISO 8601 format
 - All responses are in JSON format
-- List endpoints support pagination
+- **Pagination:** List endpoints return `{count, next, previous, results}`. Default `page_size=20`, max `100`. Override via `?page_size=N&page=M`.
 - Most endpoints require authentication via JWT Bearer token

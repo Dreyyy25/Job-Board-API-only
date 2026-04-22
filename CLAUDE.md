@@ -64,6 +64,14 @@ Each app exposes a DRF `DefaultRouter` plus a few function-based endpoints:
 - `/api/v1/seekers/` — `profiles`, `education`, `experience`, `skills`, `seeker-skills`, plus `dashboard/<uuid:user_id>/`.
 - `/api/v1/jobs/` — `job-types`, `job-locations`, `job-posts`, `job-applications`, `job-skills`, plus `apply/`, `applications/job/<uuid>/`, `applications/user/<uuid>/`.
 
+### Query hygiene
+
+Any ViewSet returning FK data must `select_related(...)`. Any reverse-FK or M2M returned in the response must `prefetch_related(...)`. Lock the query count on new list endpoints with `CaptureQueriesContext` + `assertLessEqual(len(ctx), N)` — budget `≤ 10` per list response regardless of row count. Avoid `assertNumQueries` for this purpose: it asserts exact equality and produces false failures when the real count lands below the ceiling.
+
+### Settings organization
+
+Put env-identical config in `jobApp/settings/base.py`. Put env-differing defaults in `development.py` / `production.py` / `test.py`. Never hardcode secrets or DB credentials anywhere — those stay in `config.py` and are read via `from config import ...`. `production.py` uses hard `assert` statements to fail-fast on missing `ALLOWED_HOSTS` or short `SECRET_KEY`. `manage.py` auto-picks `jobApp.settings.test` when running tests, `jobApp.settings.development` otherwise; `wsgi.py` / `asgi.py` default to `jobApp.settings.production`.
+
 ### Reference docs
 
 - `API_DOCUMENTATION.md` — full endpoint catalog with request/response examples.
