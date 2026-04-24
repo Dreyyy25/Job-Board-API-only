@@ -3,6 +3,13 @@ from django.db import models
 from django.utils import timezone
 from apps.accounts.models import UserAccount
 
+from .managers import (
+    EducationDataQuerySet,
+    ExperienceDataQuerySet,
+    SeekerProfileQuerySet,
+    SeekerSkillSetQuerySet,
+)
+
 # Create your models here.
 class SeekerProfile(models.Model):
     """Profile for job seekers with personal and academic details"""
@@ -23,7 +30,9 @@ class SeekerProfile(models.Model):
     resume_url = models.URLField(max_length=500, blank=True)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
+    objects = SeekerProfileQuerySet.as_manager()
+
     def __str__(self):
         return f"{self.first_name} {self.last_name}"
     
@@ -52,7 +61,9 @@ class EducationData(models.Model):
     end_date = models.DateField(null=True, blank=True)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
+    objects = EducationDataQuerySet.as_manager()
+
     def __str__(self):
         return f"{self.degree_type} at {self.institute_university_name}"
 
@@ -87,7 +98,9 @@ class ExperienceData(models.Model):
     end_date = models.DateField(null=True, blank=True)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
+    objects = ExperienceDataQuerySet.as_manager()
+
     def __str__(self):
         return f"{self.position} at {self.company_name}"
 
@@ -126,7 +139,9 @@ class SeekerSkillSet(models.Model):
     user_account = models.ForeignKey(UserAccount, on_delete=models.CASCADE, related_name='skills')
     skill_set = models.ForeignKey(SkillSet, on_delete=models.CASCADE)
     skill_level = models.CharField(max_length=20, choices=SKILL_LEVEL_CHOICES)
-    
+
+    objects = SeekerSkillSetQuerySet.as_manager()
+
     def __str__(self):
         return f"{self.user_account.email} - {self.skill_set.skill_name} ({self.skill_level})"
     

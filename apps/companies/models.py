@@ -3,6 +3,8 @@ from django.db import models
 from django.utils import timezone
 from apps.accounts.models import UserAccount
 
+from .managers import CompanyImagesQuerySet, CompanyQuerySet
+
 # Create your models here.
 class BusinessStream(models.Model):
     """Business categories/industries for companies"""
@@ -40,10 +42,12 @@ class Company(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active')
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
+    objects = CompanyQuerySet.as_manager()
+
     def __str__(self):
         return self.company_name
-    
+
     class Meta:
         ordering = ['company_name']
         verbose_name_plural = "Companies"
@@ -58,7 +62,9 @@ class CompanyImages(models.Model):
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='images')
     image_url = models.URLField(max_length=500)
     created_at = models.DateTimeField(default=timezone.now)
-    
+
+    objects = CompanyImagesQuerySet.as_manager()
+
     def __str__(self):
         return f"{self.company.company_name} - Image"
     

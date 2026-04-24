@@ -5,6 +5,12 @@ from apps.accounts.models import UserAccount
 from apps.companies.models import Company
 from apps.seekers.models import SkillSet
 
+from .managers import (
+    JobPostActivityQuerySet,
+    JobPostQuerySet,
+    JobPostSkillSetQuerySet,
+)
+
 # Create your models here.
 class JobType(models.Model):
     """Job types like Full-time, Part-time, Contract, etc."""
@@ -63,10 +69,12 @@ class JobPost(models.Model):
 
     is_published = models.BooleanField(default=True)
     is_active = models.BooleanField(default=True)
-    
+
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
+    objects = JobPostQuerySet.as_manager()
+
     def __str__(self):
         return f"{self.job_title} at {self.company.company_name}"
 
@@ -116,7 +124,9 @@ class JobPostActivity(models.Model):
     application_status = models.CharField(max_length=20, choices=APPLICATION_STATUS_CHOICES, default='pending')
     cover_letter = models.TextField(blank=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
+    objects = JobPostActivityQuerySet.as_manager()
+
     def __str__(self):
         return f"{self.user_account.email} applied for {self.job_post.job_title}"
     
@@ -149,7 +159,9 @@ class JobPostSkillSet(models.Model):
     skill_set = models.ForeignKey(SkillSet, on_delete=models.CASCADE)
     skill_level = models.CharField(max_length=20, choices=SKILL_LEVEL_CHOICES)
     is_required = models.BooleanField(default=True)
-    
+
+    objects = JobPostSkillSetQuerySet.as_manager()
+
     def __str__(self):
         required = "Required" if self.is_required else "Optional"
         return f"{self.job_post.job_title} - {self.skill_set.skill_name} ({self.skill_level}) - {required}"
