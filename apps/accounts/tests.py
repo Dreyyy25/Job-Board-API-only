@@ -298,6 +298,28 @@ from django.test.utils import CaptureQueriesContext
 from apps.accounts import services
 
 
+class Argon2HasherTests(APITestCase):
+    """Argon2 is configured in base.py; test.py overrides to MD5 for speed.
+
+    We use override_settings here to exercise the real hasher.
+    """
+
+    @override_settings(PASSWORD_HASHERS=[
+        'django.contrib.auth.hashers.Argon2PasswordHasher',
+        'django.contrib.auth.hashers.PBKDF2PasswordHasher',
+    ])
+    def test_new_user_password_stored_with_argon2(self):
+        user = UserAccount.objects.create_user(
+            email='argon@example.com',
+            password='Str0ng-Password!',
+            user_type='job_seeker',
+        )
+        self.assertTrue(
+            user.password.startswith('argon2'),
+            f"Expected argon2 hash, got {user.password[:10]}",
+        )
+
+
 class AccountsServiceTests(APITestCase):
     def setUp(self):
         cache.clear()
@@ -364,6 +386,38 @@ class AccountsServiceTests(APITestCase):
             services.logout_user(None)
 
 
+class FailedLoginLoggingTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+
+    def test_failed_login_logs_security_warning_with_hash_not_plaintext(self):
+        plaintext_email = "ghost@example.com"
+        with self.assertLogs('django.security', level='WARNING') as cm:
+            r = self.client.post('/api/v1/accounts/login/', {
+                'email': plaintext_email,
+                'password': 'wrong',
+            }, format='json')
+        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+        log_output = '\n'.join(cm.output)
+        self.assertIn('email_hash=', log_output)
+        # Plaintext email must NOT appear in the log line.
+        self.assertNotIn(plaintext_email, log_output)
+
+    def test_failed_login_on_existing_user_also_logs(self):
+        UserAccount.objects.create_user(
+            email='fl-existing@example.com',
+            password='Str0ng-Password!',
+            user_type='job_seeker',
+        )
+        with self.assertLogs('django.security', level='WARNING') as cm:
+            r = self.client.post('/api/v1/accounts/login/', {
+                'email': 'fl-existing@example.com',
+                'password': 'wrong',
+            }, format='json')
+        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertIn('email_hash=', '\n'.join(cm.output))
+
+
 class RegisterQueryCountTests(APITestCase):
     def setUp(self):
         cache.clear()
@@ -399,3 +453,9 @@ class SettingsModuleTests(APITestCase):
 
     def test_testserver_in_allowed_hosts(self):
         self.assertIn('testserver', django_settings.ALLOWED_HOSTS)
+
+    def test_samesite_lax_configured(self):
+        self.assertEqual(django_settings.SESSION_COOKIE_SAMESITE, 'Lax')
+        self.assertEqual(django_settings.CSRF_COOKIE_SAMESITE, 'Lax')
+        self.assertTrue(django_settings.SESSION_COOKIE_HTTPONLY)
+        self.assertFalse(django_settings.CSRF_COOKIE_HTTPONLY)

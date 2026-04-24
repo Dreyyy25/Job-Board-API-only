@@ -1,6 +1,7 @@
 from rest_framework.test import APITestCase
 from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
+from django.core.cache import cache
 from django.db import connection
 from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
@@ -383,6 +384,40 @@ class ApplyEndpointContractTests(APITestCase):
             "job_post": str(self.job.id),
         }, format="json")
         self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+
+
+class BurstThrottleAttachmentTests(APITestCase):
+    """Layered throttle composition is a class-attribute contract.
+
+    We assert the contract directly on the view — hitting real 429s in
+    tests is fragile because DRF's api_settings caches THROTTLE_RATES in
+    ways that don't always pick up test-time override_settings changes.
+    Composition is what matters; the rate ceilings are exercised in
+    production traffic.
+    """
+
+    def test_jobpost_viewset_has_layered_throttles(self):
+        from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
+        from apps.jobs.views import BurstRateThrottle, JobPostViewSet
+        self.assertEqual(
+            JobPostViewSet.throttle_classes,
+            [AnonRateThrottle, UserRateThrottle, BurstRateThrottle],
+        )
+
+    def test_apply_for_job_has_burst_throttle(self):
+        from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
+        from apps.jobs.views import BurstRateThrottle, apply_for_job
+        # @throttle_classes decorator stores the list on the wrapped view
+        # via .throttle_classes (resolved by APIView metaclass).
+        classes = getattr(apply_for_job.cls, 'throttle_classes', None)
+        self.assertEqual(
+            classes,
+            [AnonRateThrottle, UserRateThrottle, BurstRateThrottle],
+        )
+
+    def test_burst_throttle_scope_is_burst(self):
+        from apps.jobs.views import BurstRateThrottle
+        self.assertEqual(BurstRateThrottle.scope, 'burst')
 
 
 class JobPostQueryCountTests(APITestCase):

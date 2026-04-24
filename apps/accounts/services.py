@@ -5,6 +5,9 @@ exceptions into HTTP responses via the exception-to-HTTP map pinned
 in the Tier 2 spec. The view never imports simplejwt — the service
 wraps TokenError into InvalidTokenError so the abstraction holds.
 """
+import hashlib
+import logging
+
 from django.contrib.auth.password_validation import validate_password
 from django.db import transaction
 from django.utils import timezone
@@ -12,6 +15,20 @@ from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import UserAccount
+
+_security_logger = logging.getLogger('django.security')
+
+
+def _email_hash(email):
+    """Return a 16-hex-char SHA-256 of a normalized email for security logs.
+
+    Keeps raw emails out of logs (GDPR-friendly default) while preserving
+    forensic correlation: a single attacker hammering one account still
+    shows as one hash. Empty/missing email hashes to a constant prefix —
+    a spike of that value signals bot traffic without a body.
+    """
+    normalized = (email or '').strip().lower().encode()
+    return hashlib.sha256(normalized).hexdigest()[:16]
 
 
 class InvalidCredentialsError(Exception):
@@ -59,12 +76,22 @@ def register_user(email, password, user_type, **extra):
 
 
 def login_user(email, password):
-    """Return (user, tokens_dict). Raise InvalidCredentialsError on failure."""
+    """Return (user, tokens_dict). Raise InvalidCredentialsError on failure.
+
+    Logs a WARNING to django.security on failure, keyed by a 16-char
+    SHA-256 prefix of the attempted email rather than the plaintext.
+    """
     try:
         user = UserAccount.objects.get(email=email)
     except UserAccount.DoesNotExist:
+        _security_logger.warning(
+            'Failed login attempt for email_hash=%s', _email_hash(email),
+        )
         raise InvalidCredentialsError()
     if not user.check_password(password):
+        _security_logger.warning(
+            'Failed login attempt for email_hash=%s', _email_hash(email),
+        )
         raise InvalidCredentialsError()
     user.last_login = timezone.now()
     user.save(update_fields=['last_login'])

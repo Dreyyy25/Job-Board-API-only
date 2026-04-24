@@ -55,6 +55,18 @@ Each app has its own `permissions.py`. The shared convention:
 
 `perform_create` hooks auto-assign ownership: `CompanyViewSet` sets `user_account=request.user`, `JobPostViewSet` looks up the user's `Company` and sets it on the post (and 400s if none exists). Follow this pattern for any new owned resource.
 
+### Security posture (Argon2 / throttles / SameSite / logging)
+
+Password hashing uses **Argon2** first (`argon2-cffi` installed), with PBKDF2/BCrypt kept in the list so existing hashes verify and auto-upgrade on next login. `settings/test.py` overrides to `MD5PasswordHasher` for test-suite speed — override via `@override_settings` when a test needs the real hasher.
+
+Throttling is **layered**: `DEFAULT_THROTTLE_CLASSES = [AnonRateThrottle, UserRateThrottle, ScopedRateThrottle]` with rates `anon:100/day / user:1000/day / burst:60/min / register:5/min / login:10/min / token_refresh:20/min`. Write-heavy viewsets (`JobPostViewSet`, `apply_for_job`) explicitly list `throttle_classes = [AnonRateThrottle, UserRateThrottle, BurstRateThrottle]` — setting this attribute **replaces** the defaults, so always list all three to preserve layered protection. `test.py` bumps anon/user/burst to `100000/day` via inner-dict spread so tests don't 429 each other through the shared LocMemCache; scoped rates (register/login/token_refresh) are preserved from base.
+
+Cookie defaults: `SESSION_COOKIE_SAMESITE='Lax'`, `CSRF_COOKIE_SAMESITE='Lax'`, `SESSION_COOKIE_HTTPONLY=True`. These harden the admin surface — the API itself uses JWTs in the Authorization header, so an SPA with cookie-based auth would need different values.
+
+Failed-login attempts log a `WARNING` to `django.security` keyed by a 16-char SHA-256 prefix of the attempted email — preserves forensic correlation while keeping plaintext emails out of logs (GDPR-friendly default). Production LOGGING adds `django.security` and `django.request` loggers on top of the general `django`/`apps` set.
+
+`DJANGO_SETTINGS_MODULE=jobApp.settings.production manage.py check --deploy` returns zero warnings when the required env is set — see `.env.example` "Minimum production env" section.
+
 ### Service layer + custom QuerySets
 
 Every app has a `services.py` that owns the multi-step business logic (`apps.accounts.services.register_user`, `apps.jobs.services.apply_for_job`, `apps.seekers.services.build_seeker_dashboard`, etc.). Views are thin try/except dispatchers: they call a service, translate domain exceptions into HTTP responses, and serialize the return. Domain exceptions like `InvalidCredentialsError`, `InvalidApplicantError`, `DashboardPermissionError` map 1:1 to HTTP statuses — don't invent new translations in views, extend the service's exception set instead.
