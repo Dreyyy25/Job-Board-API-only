@@ -31,9 +31,12 @@ class JobLocation(models.Model):
     
     def __str__(self):
         return f"{self.city}, {self.country}"
-    
+
     class Meta:
         ordering = ['country', 'city']
+        indexes = [
+            models.Index(fields=['country', 'city'], name='joblocation_country_city_idx'),
+        ]
 
 class JobPost(models.Model):
     """Main job posting model"""
@@ -66,9 +69,33 @@ class JobPost(models.Model):
     
     def __str__(self):
         return f"{self.job_title} at {self.company.company_name}"
-    
+
     class Meta:
         ordering = ['-created_at']
+        indexes = [
+            models.Index(
+                fields=['is_published', 'is_active', '-created_at'],
+                name='jobpost_pub_active_created_idx',
+            ),
+            models.Index(
+                fields=['company', '-created_at'],
+                name='jobpost_company_created_idx',
+            ),
+            models.Index(fields=['deadline_date'], name='jobpost_deadline_idx'),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                check=models.Q(salary_min__isnull=True)
+                | models.Q(salary_max__isnull=True)
+                | models.Q(salary_min__lte=models.F('salary_max')),
+                name='jobpost_salary_min_le_max',
+            ),
+            models.CheckConstraint(
+                check=(models.Q(salary_min__isnull=True) | models.Q(salary_min__gte=0))
+                & (models.Q(salary_max__isnull=True) | models.Q(salary_max__gte=0)),
+                name='jobpost_salary_non_negative',
+            ),
+        ]
 
 class JobPostActivity(models.Model):
     """Job applications from seekers"""
@@ -96,6 +123,16 @@ class JobPostActivity(models.Model):
     class Meta:
         ordering = ['-application_date']
         unique_together = ['user_account', 'job_post']
+        indexes = [
+            models.Index(
+                fields=['job_post', 'application_status'],
+                name='jpactivity_job_status_idx',
+            ),
+            models.Index(
+                fields=['user_account', '-application_date'],
+                name='jpactivity_user_date_idx',
+            ),
+        ]
 
 class JobPostSkillSet(models.Model):
     """Skills required for specific job posts"""

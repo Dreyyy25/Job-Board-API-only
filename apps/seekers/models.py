@@ -55,9 +55,22 @@ class EducationData(models.Model):
     
     def __str__(self):
         return f"{self.degree_type} at {self.institute_university_name}"
-    
+
     class Meta:
         ordering = ['-end_date', '-start_date']
+        constraints = [
+            models.CheckConstraint(
+                check=models.Q(percentage__isnull=True)
+                | (models.Q(percentage__gte=0) & models.Q(percentage__lte=100)),
+                name='education_percentage_range',
+            ),
+            models.CheckConstraint(
+                check=models.Q(start_date__isnull=True)
+                | models.Q(end_date__isnull=True)
+                | models.Q(start_date__lte=models.F('end_date')),
+                name='education_date_order',
+            ),
+        ]
 
 class ExperienceData(models.Model):
     """Work experience records for job seekers"""
@@ -77,9 +90,17 @@ class ExperienceData(models.Model):
     
     def __str__(self):
         return f"{self.position} at {self.company_name}"
-    
+
     class Meta:
         ordering = ['-created_at']
+        constraints = [
+            models.CheckConstraint(
+                check=models.Q(start_date__isnull=True)
+                | models.Q(end_date__isnull=True)
+                | models.Q(start_date__lte=models.F('end_date')),
+                name='experience_date_order',
+            ),
+        ]
 
 class SkillSet(models.Model):
     """Master list of skills"""

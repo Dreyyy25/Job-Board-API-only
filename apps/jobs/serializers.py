@@ -27,6 +27,20 @@ class JobPostSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'company', 'created_at', 'updated_at']
 
+    def validate(self, attrs):
+        salary_min = attrs.get('salary_min', getattr(self.instance, 'salary_min', None))
+        salary_max = attrs.get('salary_max', getattr(self.instance, 'salary_max', None))
+        if salary_min is not None and salary_min < 0:
+            raise serializers.ValidationError({'salary_min': 'Must be non-negative.'})
+        if salary_max is not None and salary_max < 0:
+            raise serializers.ValidationError({'salary_max': 'Must be non-negative.'})
+        if (salary_min is not None and salary_max is not None
+                and salary_min > salary_max):
+            raise serializers.ValidationError(
+                {'salary_min': 'salary_min must be <= salary_max.'}
+            )
+        return attrs
+
     def to_representation(self, instance):
         data = super().to_representation(instance)
         request = self.context.get('request')

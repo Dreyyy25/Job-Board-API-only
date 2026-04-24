@@ -47,6 +47,9 @@ class Company(models.Model):
     class Meta:
         ordering = ['company_name']
         verbose_name_plural = "Companies"
+        indexes = [
+            models.Index(fields=['status'], name='company_status_idx'),
+        ]
 
 class CompanyImages(models.Model):
     """Images for company profiles"""

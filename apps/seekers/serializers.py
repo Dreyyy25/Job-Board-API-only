@@ -15,6 +15,15 @@ class SeekerProfileSerializer(serializers.ModelSerializer):
         read_only_fields = ['user_account', 'created_at', 'updated_at']
 
 
+def _validate_date_order(attrs, instance):
+    start = attrs.get('start_date', getattr(instance, 'start_date', None))
+    end = attrs.get('end_date', getattr(instance, 'end_date', None))
+    if start is not None and end is not None and start > end:
+        raise serializers.ValidationError(
+            {'start_date': 'start_date must be <= end_date.'}
+        )
+
+
 class EducationDataSerializer(serializers.ModelSerializer):
     class Meta:
         model = EducationData
@@ -24,6 +33,15 @@ class EducationDataSerializer(serializers.ModelSerializer):
             'start_date', 'end_date', 'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'user_account', 'created_at', 'updated_at']
+
+    def validate_percentage(self, value):
+        if value is not None and (value < 0 or value > 100):
+            raise serializers.ValidationError('Must be between 0 and 100.')
+        return value
+
+    def validate(self, attrs):
+        _validate_date_order(attrs, self.instance)
+        return attrs
 
 
 class ExperienceDataSerializer(serializers.ModelSerializer):
@@ -35,6 +53,10 @@ class ExperienceDataSerializer(serializers.ModelSerializer):
             'start_date', 'end_date', 'created_at', 'updated_at',
         ]
         read_only_fields = ['id', 'user_account', 'created_at', 'updated_at']
+
+    def validate(self, attrs):
+        _validate_date_order(attrs, self.instance)
+        return attrs
 
 
 class SkillSetSerializer(serializers.ModelSerializer):

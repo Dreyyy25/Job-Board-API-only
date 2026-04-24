@@ -63,6 +63,9 @@ class UserAccount(AbstractBaseUser, PermissionsMixin):
         verbose_name = 'User Account'
         verbose_name_plural = 'User Accounts'
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user_type'], name='useracct_user_type_idx'),
+        ]
     
     def __str__(self):
         return self.email
