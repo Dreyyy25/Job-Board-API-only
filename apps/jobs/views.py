@@ -1,7 +1,8 @@
 from rest_framework import viewsets, status
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from apps.accounts.authentication import CustomJWTAuthentication
@@ -18,6 +19,16 @@ from .permissions import (
     IsApplicantOrCompanyOrAdmin,
     CanManageJobSkills
 )
+
+
+class BurstRateThrottle(UserRateThrottle):
+    """Per-user burst ceiling for write-heavy endpoints.
+
+    Inherits UserRateThrottle so anonymous requests are not burst-throttled
+    (get_cache_key returns None for anon). Anon traffic is bounded by the
+    default AnonRateThrottle (100/day).
+    """
+    scope = 'burst'
 
 # Create your views here.
 class JobTypeViewSet(viewsets.ModelViewSet):
@@ -56,6 +67,9 @@ class JobPostViewSet(viewsets.ModelViewSet):
     serializer_class = JobPostSerializer
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [IsJobPosterOrAdmin]
+    # Layered: anon ceiling + per-user daily + per-user burst.
+    # Order matters only for the response header DRF sets on 429.
+    throttle_classes = [AnonRateThrottle, UserRateThrottle, BurstRateThrottle]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_class = JobPostFilter
     search_fields = ['job_title', 'job_description', 'company__company_name']
@@ -141,6 +155,7 @@ class JobPostSkillSetViewSet(viewsets.ModelViewSet):
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
+@throttle_classes([AnonRateThrottle, UserRateThrottle, BurstRateThrottle])
 def apply_for_job(request):
     """Apply for a job. Seekers only; cannot apply twice."""
     try:

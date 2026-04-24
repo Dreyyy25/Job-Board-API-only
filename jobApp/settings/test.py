@@ -1,5 +1,6 @@
 """Test settings — fast password hashing, loose host list, no SSL redirect."""
 from .base import *  # noqa: F401,F403
+from .base import REST_FRAMEWORK as _BASE_RF
 
 DEBUG = False
 
@@ -20,3 +21,18 @@ CSRF_COOKIE_SECURE = False
 # CORS settings — tests rely on override_settings to enable specific origins.
 CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOWED_ORIGINS = []
+
+# Bump anon/user/burst ceilings high so tests don't accidentally 429 each
+# other through the shared LocMemCache. Scoped rates (register/login/
+# token_refresh) are preserved from base so the existing scoped-throttle
+# tests (e.g. test_register_throttles_after_limit) still exercise the
+# 5/min limit they expect.
+REST_FRAMEWORK = {
+    **_BASE_RF,
+    'DEFAULT_THROTTLE_RATES': {
+        **_BASE_RF['DEFAULT_THROTTLE_RATES'],
+        'anon': '100000/day',
+        'user': '100000/day',
+        'burst': '100000/day',
+    },
+}
