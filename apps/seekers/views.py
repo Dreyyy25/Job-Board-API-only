@@ -48,7 +48,17 @@ class SeekerProfileViewSet(viewsets.ModelViewSet):
             return base.none()
     
     def perform_create(self, serializer):
-        """Automatically assign the current user as the profile owner"""
+        """Automatically assign the current user as the profile owner.
+
+        After Tier 1's signal, every job_seeker user has an auto-created
+        SeekerProfile. Pre-check existence and 400 rather than letting
+        the OneToOne IntegrityError turn into a 500.
+        """
+        from rest_framework.exceptions import ValidationError
+        if SeekerProfile.objects.filter(user_account=self.request.user).exists():
+            raise ValidationError(
+                {'detail': 'Profile already exists. Use PATCH to update.'}
+            )
         serializer.save(user_account=self.request.user)
 
 

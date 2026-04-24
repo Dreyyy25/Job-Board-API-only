@@ -21,8 +21,10 @@ class JobPostHiddenFieldTests(APITestCase):
         self.seeker = UserAccount.objects.create_user(
             email="seeker@example.com", password="Str0ng-Password!", user_type="job_seeker")
         stream = BusinessStream.objects.create(business_stream_name="Tech")
-        company = Company.objects.create(
-            user_account=self.owner, company_name="Acme", business_stream=stream)
+        company = self.owner.company_profile
+        company.company_name = "Acme"
+        company.business_stream = stream
+        company.save()
         job_type = JobType.objects.create(job_type_name="Full-time")
         location = JobLocation.objects.create(city="Manila", country="PH")
         self.job = JobPost.objects.create(
@@ -53,10 +55,14 @@ class JobPostPermissionTests(APITestCase):
         self.seeker = UserAccount.objects.create_user(
             email="s@example.com", password="Str0ng-Password!", user_type="job_seeker")
         stream = BusinessStream.objects.create(business_stream_name="Tech2")
-        self.owner_co = Company.objects.create(
-            user_account=self.owner, company_name="Owner Co", business_stream=stream)
-        self.rival_co = Company.objects.create(
-            user_account=self.rival, company_name="Rival Co", business_stream=stream)
+        self.owner_co = self.owner.company_profile
+        self.owner_co.company_name = "Owner Co"
+        self.owner_co.business_stream = stream
+        self.owner_co.save()
+        self.rival_co = self.rival.company_profile
+        self.rival_co.company_name = "Rival Co"
+        self.rival_co.business_stream = stream
+        self.rival_co.save()
         self.job_type = JobType.objects.create(job_type_name="Contract")
         self.loc = JobLocation.objects.create(city="Cebu", country="PH")
         self.owner_job = JobPost.objects.create(
@@ -103,8 +109,10 @@ class ApplicationTests(APITestCase):
         owner = UserAccount.objects.create_user(
             email="appowner@example.com", password="Str0ng-Password!", user_type="company")
         stream = BusinessStream.objects.create(business_stream_name="Tech3")
-        company = Company.objects.create(
-            user_account=owner, company_name="Co", business_stream=stream)
+        company = owner.company_profile
+        company.company_name = "Co"
+        company.business_stream = stream
+        company.save()
         job_type = JobType.objects.create(job_type_name="Intern")
         loc = JobLocation.objects.create(city="Davao", country="PH")
         self.job = JobPost.objects.create(
@@ -155,8 +163,10 @@ class JobPostFilterTests(APITestCase):
             user_type="company",
         )
         stream = BusinessStream.objects.create(business_stream_name="Filt Tech")
-        company = Company.objects.create(
-            user_account=owner, company_name="FiltCo", business_stream=stream)
+        company = owner.company_profile
+        company.company_name = "FiltCo"
+        company.business_stream = stream
+        company.save()
         self.ft = JobType.objects.create(job_type_name="FiltFT")
         self.pt = JobType.objects.create(job_type_name="FiltPT")
         self.manila = JobLocation.objects.create(city="Manila", country="PH")
@@ -210,6 +220,61 @@ class JobPostFilterTests(APITestCase):
 QUERY_BUDGET = 10  # ceiling; tune downward as prefetches are added
 
 
+from django.db import IntegrityError
+
+
+class JobPostSalaryConstraintTests(APITestCase):
+    def setUp(self):
+        self.owner = UserAccount.objects.create_user(
+            email="sal-owner@example.com",
+            password="Str0ng-Password!",
+            user_type="company",
+        )
+        stream = BusinessStream.objects.create(business_stream_name="SalTech")
+        self.company = self.owner.company_profile
+        self.company.company_name = "SalCo"
+        self.company.business_stream = stream
+        self.company.save()
+        self.job_type = JobType.objects.create(job_type_name="SalFT")
+        self.loc = JobLocation.objects.create(city="SalCity", country="PH")
+        _auth(self.client, self.owner)
+
+    def _payload(self, **overrides):
+        base = {
+            "job_type": str(self.job_type.id),
+            "job_location": str(self.loc.id),
+            "job_title": "Dev",
+            "job_description": "...",
+        }
+        base.update(overrides)
+        return base
+
+    def test_salary_min_gt_max_rejected_by_serializer(self):
+        r = self.client.post(
+            "/api/v1/jobs/job-posts/",
+            self._payload(salary_min=5000, salary_max=1000),
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("salary_min", r.data)
+
+    def test_salary_min_gt_max_rejected_by_db(self):
+        with self.assertRaises(IntegrityError):
+            JobPost.objects.create(
+                company=self.company, job_type=self.job_type, job_location=self.loc,
+                job_title="Bad", job_description="...",
+                salary_min=9000, salary_max=100,
+            )
+
+    def test_negative_salary_rejected_by_serializer(self):
+        r = self.client.post(
+            "/api/v1/jobs/job-posts/",
+            self._payload(salary_min=-1, salary_max=100),
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+
 class JobPostQueryCountTests(APITestCase):
     def setUp(self):
         owner = UserAccount.objects.create_user(
@@ -218,8 +283,10 @@ class JobPostQueryCountTests(APITestCase):
             user_type="company",
         )
         stream = BusinessStream.objects.create(business_stream_name="QC Tech")
-        company = Company.objects.create(
-            user_account=owner, company_name="QCCo", business_stream=stream)
+        company = owner.company_profile
+        company.company_name = "QCCo"
+        company.business_stream = stream
+        company.save()
         jt = JobType.objects.create(job_type_name="QC FT")
         loc = JobLocation.objects.create(city="QCity", country="PH")
         for i in range(50):

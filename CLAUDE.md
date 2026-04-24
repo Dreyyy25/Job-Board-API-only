@@ -55,6 +55,15 @@ Each app has its own `permissions.py`. The shared convention:
 
 `perform_create` hooks auto-assign ownership: `CompanyViewSet` sets `user_account=request.user`, `JobPostViewSet` looks up the user's `Company` and sets it on the post (and 400s if none exists). Follow this pattern for any new owned resource.
 
+### Profile auto-creation (post_save signal)
+
+Registering a `UserAccount` auto-creates its downstream profile via `apps.accounts.signals.create_user_profile`:
+
+- `user_type='job_seeker'` → `SeekerProfile(first_name='', last_name='')`.
+- `user_type='company'` → `Company(company_name='', business_stream=<Uncategorized>)`. The `'Uncategorized'` `BusinessStream` is `get_or_create`d on demand. Don't rename it — delete it and its companies first if you need to retire the catch-all.
+
+`UserAccountManager.create_user` and the `register` view are both wrapped in `transaction.atomic()`, so signal failure rolls back the user row. `CompanyViewSet.perform_create` and `SeekerProfileViewSet.perform_create` 400 with `{'detail': 'Profile already exists...'}` — the signal guarantees a profile exists, so POST becomes PATCH territory. `register`'s response body includes a serialized `profile` payload so the frontend doesn't need a second round-trip.
+
 ### Routing
 
 Each app exposes a DRF `DefaultRouter` plus a few function-based endpoints:

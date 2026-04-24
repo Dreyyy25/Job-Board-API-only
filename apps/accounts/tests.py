@@ -189,6 +189,109 @@ class SecurityHeaderTests(APITestCase):
 from django.conf import settings as django_settings
 
 
+from unittest.mock import patch
+from apps.companies.models import Company
+from apps.seekers.models import SeekerProfile
+
+
+class SignalCreatedProfileTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+
+    def test_registering_seeker_creates_profile(self):
+        r = self.client.post("/api/v1/accounts/register/", {
+            "email": "sig-seeker@example.com",
+            "password": "Str0ng-Password!",
+            "user_type": "job_seeker",
+        }, format="json")
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        user = UserAccount.objects.get(email="sig-seeker@example.com")
+        self.assertTrue(SeekerProfile.objects.filter(user_account=user).exists())
+
+    def test_registering_company_creates_company_row(self):
+        r = self.client.post("/api/v1/accounts/register/", {
+            "email": "sig-co@example.com",
+            "password": "Str0ng-Password!",
+            "user_type": "company",
+        }, format="json")
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        user = UserAccount.objects.get(email="sig-co@example.com")
+        co = Company.objects.get(user_account=user)
+        self.assertEqual(co.business_stream.business_stream_name, "Uncategorized")
+
+    def test_signal_creates_company_on_create_superuser(self):
+        user = UserAccount.objects.create_superuser(
+            email="su@example.com", password="Str0ng-Password!",
+        )
+        self.assertTrue(Company.objects.filter(user_account=user).exists())
+
+    def test_signal_creates_seeker_profile_on_create_user(self):
+        user = UserAccount.objects.create_user(
+            email="cu-seeker@example.com", password="Str0ng-Password!",
+            user_type="job_seeker",
+        )
+        self.assertTrue(SeekerProfile.objects.filter(user_account=user).exists())
+
+    def test_signal_idempotent_on_resave(self):
+        user = UserAccount.objects.create_user(
+            email="idem@example.com", password="Str0ng-Password!",
+            user_type="job_seeker",
+        )
+        user.save()  # re-save
+        self.assertEqual(
+            SeekerProfile.objects.filter(user_account=user).count(), 1,
+        )
+
+    def test_register_rollback_on_signal_failure(self):
+        email = "rollback-register@example.com"
+        with patch(
+            "apps.seekers.models.SeekerProfile.objects.get_or_create",
+            side_effect=RuntimeError("boom"),
+        ):
+            with self.assertRaises(RuntimeError):
+                self.client.post("/api/v1/accounts/register/", {
+                    "email": email,
+                    "password": "Str0ng-Password!",
+                    "user_type": "job_seeker",
+                }, format="json")
+        self.assertEqual(UserAccount.objects.filter(email=email).count(), 0)
+
+    def test_create_user_rollback_on_signal_failure(self):
+        email = "rollback-cu@example.com"
+        with patch(
+            "apps.seekers.models.SeekerProfile.objects.get_or_create",
+            side_effect=RuntimeError("boom"),
+        ):
+            with self.assertRaises(RuntimeError):
+                UserAccount.objects.create_user(
+                    email=email, password="Str0ng-Password!",
+                    user_type="job_seeker",
+                )
+        self.assertEqual(UserAccount.objects.filter(email=email).count(), 0)
+
+    def test_register_response_includes_seeker_profile(self):
+        r = self.client.post("/api/v1/accounts/register/", {
+            "email": "resp-seeker@example.com",
+            "password": "Str0ng-Password!",
+            "user_type": "job_seeker",
+        }, format="json")
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        self.assertIn("profile", r.data)
+        self.assertIsNotNone(r.data["profile"])
+        # SeekerProfile serializer includes first_name/last_name
+        self.assertIn("first_name", r.data["profile"])
+
+    def test_register_response_includes_company_profile(self):
+        r = self.client.post("/api/v1/accounts/register/", {
+            "email": "resp-co@example.com",
+            "password": "Str0ng-Password!",
+            "user_type": "company",
+        }, format="json")
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        self.assertIn("profile", r.data)
+        self.assertIn("company_name", r.data["profile"])
+
+
 class SettingsModuleTests(APITestCase):
     """Verify we're running under the test settings module."""
 

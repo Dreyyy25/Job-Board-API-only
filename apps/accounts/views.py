@@ -7,6 +7,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.tokens import RefreshToken as SimpleJWTRefreshToken
 from django.contrib.auth.hashers import make_password, check_password
+from django.db import transaction
 from django.utils import timezone
 
 from .models import UserAccount
@@ -66,6 +67,7 @@ class UserAccountViewSet(viewsets.ModelViewSet):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 @throttle_classes([RegisterThrottle])
+@transaction.atomic
 def register(request):
     """Register a new user account"""
     serializer = RegisterSerializer(data=request.data)
@@ -75,6 +77,21 @@ def register(request):
         refresh['user_id'] = str(user.id)
         refresh['email'] = user.email
         refresh['user_type'] = user.user_type
+
+        # Serialize the signal-created profile. Lazy imports keep apps.accounts
+        # at the root of the dependency graph (no module-top cross-app imports).
+        profile_data = None
+        if user.user_type == 'job_seeker':
+            from apps.seekers.serializers import SeekerProfileSerializer
+            profile = getattr(user, 'seeker_profile', None)
+            if profile is not None:
+                profile_data = SeekerProfileSerializer(profile).data
+        elif user.user_type == 'company':
+            from apps.companies.serializers import CompanySerializer
+            profile = getattr(user, 'company_profile', None)
+            if profile is not None:
+                profile_data = CompanySerializer(profile).data
+
         return Response({
             'message': 'User created successfully',
             'user': {
@@ -86,6 +103,7 @@ def register(request):
                 'refresh': str(refresh),
                 'access': str(refresh.access_token),
             },
+            'profile': profile_data,
         }, status=status.HTTP_201_CREATED)
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 

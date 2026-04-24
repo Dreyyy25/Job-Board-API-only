@@ -12,8 +12,10 @@ class CompanySerializerTests(APITestCase):
         self.other = UserAccount.objects.create_user(
             email="other@example.com", password="Str0ng-Password!", user_type="company")
         self.stream = BusinessStream.objects.create(business_stream_name="Tech")
-        self.company = Company.objects.create(
-            user_account=self.owner, company_name="Acme", business_stream=self.stream)
+        self.company = self.owner.company_profile
+        self.company.company_name = "Acme"
+        self.company.business_stream = self.stream
+        self.company.save()
         token = RefreshToken.for_user(self.owner)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token.access_token}")
 
@@ -36,10 +38,14 @@ class CompanyPermissionTests(APITestCase):
         self.seeker = UserAccount.objects.create_user(
             email="co-seeker@example.com", password="Str0ng-Password!", user_type="job_seeker")
         self.stream = BusinessStream.objects.create(business_stream_name="Finance")
-        self.owner_co = Company.objects.create(
-            user_account=self.owner, company_name="Owner", business_stream=self.stream)
-        self.other_co = Company.objects.create(
-            user_account=self.other, company_name="Other", business_stream=self.stream)
+        self.owner_co = self.owner.company_profile
+        self.owner_co.company_name = "Owner"
+        self.owner_co.business_stream = self.stream
+        self.owner_co.save()
+        self.other_co = self.other.company_profile
+        self.other_co.company_name = "Other"
+        self.other_co.business_stream = self.stream
+        self.other_co.save()
 
     def test_owner_cannot_edit_other_company(self):
         token = RefreshToken.for_user(self.owner)
@@ -85,8 +91,10 @@ class CompanyQueryCountTests(APITestCase):
                 password="Str0ng-Password!",
                 user_type="company",
             )
-            co = Company.objects.create(
-                user_account=owner, company_name=f"Co {i}", business_stream=stream)
+            co = owner.company_profile
+            co.company_name = f"Co {i}"
+            co.business_stream = stream
+            co.save()
             CompanyImages.objects.create(company=co, image_url="https://x.invalid/a.png")
 
     def test_company_list_query_count(self):
@@ -99,3 +107,21 @@ class CompanyQueryCountTests(APITestCase):
             len(ctx), COMPANY_QUERY_BUDGET,
             f"Query count {len(ctx)} exceeds budget {COMPANY_QUERY_BUDGET}",
         )
+
+
+class CompanyCreateConflictTests(APITestCase):
+    def test_company_create_returns_400_when_profile_exists(self):
+        user = UserAccount.objects.create_user(
+            email="cc@example.com", password="Str0ng-Password!",
+            user_type="company",
+        )
+        # Signal already created a Company for this user.
+        stream = BusinessStream.objects.create(business_stream_name="CC Tech")
+        token = RefreshToken.for_user(user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token.access_token}")
+        r = self.client.post("/api/v1/companies/profile/", {
+            "company_name": "Another",
+            "business_stream": str(stream.id),
+        }, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("detail", r.data)

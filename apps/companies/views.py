@@ -59,13 +59,17 @@ class CompanyViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         """Automatically assign the current user as the company owner.
 
-        Only users with user_type='company' may create companies — the
-        Company.user_account FK limit_choices_to is only enforced in
-        admin forms, not the ORM, so we guard here explicitly.
+        After the Tier 1 signal lands, every company user has an
+        auto-created Company. Pre-check existence and 400 here instead of
+        letting the OneToOne IntegrityError turn into a 500.
         """
+        from rest_framework.exceptions import PermissionDenied, ValidationError
         if self.request.user.user_type != 'company':
-            from rest_framework.exceptions import PermissionDenied
             raise PermissionDenied("Only company users can create companies")
+        if Company.objects.filter(user_account=self.request.user).exists():
+            raise ValidationError(
+                {'detail': 'Profile already exists. Use PATCH to update.'}
+            )
         serializer.save(user_account=self.request.user)
 
 
