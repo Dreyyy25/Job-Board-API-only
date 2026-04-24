@@ -292,6 +292,96 @@ class SignalCreatedProfileTests(APITestCase):
         self.assertIn("company_name", r.data["profile"])
 
 
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
+from apps.accounts import services
+
+
+class AccountsServiceTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+
+    def test_register_user_returns_user_and_tokens(self):
+        user, tokens = services.register_user(
+            email="svc-seeker@example.com",
+            password="Str0ng-Password!",
+            user_type="job_seeker",
+        )
+        self.assertEqual(user.email, "svc-seeker@example.com")
+        self.assertIn("access", tokens)
+        self.assertIn("refresh", tokens)
+
+    def test_register_user_rejects_weak_password(self):
+        with self.assertRaises(DjangoValidationError):
+            services.register_user(
+                email="weak@example.com",
+                password="abc",
+                user_type="job_seeker",
+            )
+
+    def test_register_user_prefetches_profile(self):
+        user, _ = services.register_user(
+            email="prefetch@example.com",
+            password="Str0ng-Password!",
+            user_type="job_seeker",
+        )
+        with CaptureQueriesContext(connection) as ctx:
+            _ = user.seeker_profile
+        self.assertEqual(len(ctx), 0)
+
+    def test_login_user_happy_path(self):
+        UserAccount.objects.create_user(
+            email="login-svc@example.com",
+            password="Str0ng-Password!",
+            user_type="job_seeker",
+        )
+        user, tokens = services.login_user(
+            "login-svc@example.com", "Str0ng-Password!",
+        )
+        self.assertEqual(user.email, "login-svc@example.com")
+        self.assertIn("access", tokens)
+
+    def test_login_user_unknown_email_raises(self):
+        with self.assertRaises(services.InvalidCredentialsError):
+            services.login_user("nobody@example.com", "x")
+
+    def test_login_user_bad_password_raises(self):
+        UserAccount.objects.create_user(
+            email="bad-pass@example.com",
+            password="Str0ng-Password!",
+            user_type="job_seeker",
+        )
+        with self.assertRaises(services.InvalidCredentialsError):
+            services.login_user("bad-pass@example.com", "wrong")
+
+    def test_logout_user_invalid_token_raises(self):
+        with self.assertRaises(services.InvalidTokenError):
+            services.logout_user("not-a-real-token")
+
+    def test_logout_user_missing_token_raises(self):
+        with self.assertRaises(services.InvalidTokenError):
+            services.logout_user(None)
+
+
+class RegisterQueryCountTests(APITestCase):
+    def setUp(self):
+        cache.clear()
+
+    def test_register_endpoint_prefetches_profile_reasonably(self):
+        with CaptureQueriesContext(connection) as ctx:
+            r = self.client.post("/api/v1/accounts/register/", {
+                "email": "qc-reg@example.com",
+                "password": "Str0ng-Password!",
+                "user_type": "job_seeker",
+            }, format="json")
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        self.assertLessEqual(
+            len(ctx), 20,
+            f"Register query count {len(ctx)} unexpectedly high",
+        )
+
+
 class SettingsModuleTests(APITestCase):
     """Verify we're running under the test settings module."""
 

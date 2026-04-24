@@ -55,6 +55,14 @@ Each app has its own `permissions.py`. The shared convention:
 
 `perform_create` hooks auto-assign ownership: `CompanyViewSet` sets `user_account=request.user`, `JobPostViewSet` looks up the user's `Company` and sets it on the post (and 400s if none exists). Follow this pattern for any new owned resource.
 
+### Service layer + custom QuerySets
+
+Every app has a `services.py` that owns the multi-step business logic (`apps.accounts.services.register_user`, `apps.jobs.services.apply_for_job`, `apps.seekers.services.build_seeker_dashboard`, etc.). Views are thin try/except dispatchers: they call a service, translate domain exceptions into HTTP responses, and serialize the return. Domain exceptions like `InvalidCredentialsError`, `InvalidApplicantError`, `DashboardPermissionError` map 1:1 to HTTP statuses — don't invent new translations in views, extend the service's exception set instead.
+
+Every app also has a `managers.py` exposing a custom `QuerySet` with `.with_related()` / `.published()` / `.for_user(user)` / `.for_company(user)` / `.active()` chainable methods. Viewsets' `get_queryset` is now three-to-four branches of queryset-method composition — never inline `.select_related(...)`. `grep -rn 'select_related\|prefetch_related' apps/*/views.py` must return zero matches; the moment it doesn't, the N+1 regression is back.
+
+The custom `UserAccountManager` uses the single-base `BaseUserManager.from_queryset(UserAccountQuerySet)` pattern — not `(BaseUserManager, Manager.from_queryset(X))` — to avoid the Manager-diamond MRO ambiguity. Keep `create_user` / `create_superuser` on the composite class body.
+
 ### Profile auto-creation (post_save signal)
 
 Registering a `UserAccount` auto-creates its downstream profile via `apps.accounts.signals.create_user_profile`:

@@ -3,9 +3,10 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from apps.accounts.authentication import CustomJWTAuthentication
+from . import services
 from .models import SeekerProfile, EducationData, ExperienceData, SkillSet, SeekerSkillSet
 from .serializers import (
-    SeekerProfileSerializer, EducationDataSerializer, 
+    SeekerProfileSerializer, EducationDataSerializer,
     ExperienceDataSerializer, SkillSetSerializer, SeekerSkillSetSerializer
 )
 from .permissions import (
@@ -28,24 +29,14 @@ class SeekerProfileViewSet(viewsets.ModelViewSet):
     permission_classes = [IsSeekerOwnerOrAdmin]
     
     def get_queryset(self):
-        """
-        Filter queryset based on user:
-        - Admins see all profiles
-        - Job seekers see only their own profile
-        - Companies see all active seeker profiles
-        """
+        """Admins/companies → all; seekers → own; else → none."""
+        qs = SeekerProfile.objects.with_related()
         user = self.request.user
-        
-        base = SeekerProfile.objects.select_related('user_account')
-        if user.is_staff or user.is_superuser:
-            return base
-        elif user.user_type == 'job_seeker':
-            return base.filter(user_account=user)
-        elif user.user_type == 'company':
-            # Companies can view all seeker profiles
-            return base
-        else:
-            return base.none()
+        if user.is_staff or user.is_superuser or user.user_type == 'company':
+            return qs
+        if user.user_type == 'job_seeker':
+            return qs.filter(user_account=user)
+        return qs.none()
     
     def perform_create(self, serializer):
         """Automatically assign the current user as the profile owner.
@@ -75,23 +66,14 @@ class EducationDataViewSet(viewsets.ModelViewSet):
     permission_classes = [IsSeekerOwnerOrAdmin]
     
     def get_queryset(self):
-        """
-        Filter queryset based on user:
-        - Admins see all education data
-        - Job seekers see only their own education
-        - Companies see all education data
-        """
+        """Admins/companies → all; seekers → own; else → none."""
+        qs = EducationData.objects.with_related()
         user = self.request.user
-        
-        base = EducationData.objects.select_related('user_account')
-        if user.is_staff or user.is_superuser:
-            return base
-        elif user.user_type == 'job_seeker':
-            return base.filter(user_account=user)
-        elif user.user_type == 'company':
-            return base
-        else:
-            return base.none()
+        if user.is_staff or user.is_superuser or user.user_type == 'company':
+            return qs
+        if user.user_type == 'job_seeker':
+            return qs.for_user(user)
+        return qs.none()
     
     def perform_create(self, serializer):
         """Automatically assign the current user"""
@@ -111,23 +93,14 @@ class ExperienceDataViewSet(viewsets.ModelViewSet):
     permission_classes = [IsSeekerOwnerOrAdmin]
     
     def get_queryset(self):
-        """
-        Filter queryset based on user:
-        - Admins see all experience data
-        - Job seekers see only their own experience
-        - Companies see all experience data
-        """
+        """Admins/companies → all; seekers → own; else → none."""
+        qs = ExperienceData.objects.with_related()
         user = self.request.user
-        
-        base = ExperienceData.objects.select_related('user_account')
-        if user.is_staff or user.is_superuser:
-            return base
-        elif user.user_type == 'job_seeker':
-            return base.filter(user_account=user)
-        elif user.user_type == 'company':
-            return base
-        else:
-            return base.none()
+        if user.is_staff or user.is_superuser or user.user_type == 'company':
+            return qs
+        if user.user_type == 'job_seeker':
+            return qs.for_user(user)
+        return qs.none()
     
     def perform_create(self, serializer):
         """Automatically assign the current user"""
@@ -159,23 +132,14 @@ class SeekerSkillSetViewSet(viewsets.ModelViewSet):
     permission_classes = [CanManageSeekerSkills]
     
     def get_queryset(self):
-        """
-        Filter queryset based on user:
-        - Admins see all skills
-        - Job seekers see only their own skills
-        - Companies see all seeker skills
-        """
+        """Admins/companies → all; seekers → own; else → none."""
+        qs = SeekerSkillSet.objects.with_related()
         user = self.request.user
-        
-        base = SeekerSkillSet.objects.select_related('user_account', 'skill_set')
-        if user.is_staff or user.is_superuser:
-            return base
-        elif user.user_type == 'job_seeker':
-            return base.filter(user_account=user)
-        elif user.user_type == 'company':
-            return base
-        else:
-            return base.none()
+        if user.is_staff or user.is_superuser or user.user_type == 'company':
+            return qs
+        if user.user_type == 'job_seeker':
+            return qs.for_user(user)
+        return qs.none()
     
     def perform_create(self, serializer):
         """Automatically assign the current user"""
@@ -185,37 +149,11 @@ class SeekerSkillSetViewSet(viewsets.ModelViewSet):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def seeker_dashboard(request, user_id):
-    """
-    Get all seeker data for dashboard.
-    - Job seekers can access their own dashboard
-    - Admins can access any seeker dashboard
-    - Companies can view seeker dashboards (for applicant evaluation)
-    """
-    # Security check: verify user can access this dashboard
-    user = request.user
-    is_owner = str(user.id) == str(user_id)
-    is_admin = user.is_staff or user.is_superuser
-    is_company = user.user_type == 'company'
-    
-    # Only owner, admin, or company can access
-    if not (is_owner or is_admin or is_company):
-        return Response({
-            'error': 'You do not have permission to access this dashboard'
-        }, status=status.HTTP_403_FORBIDDEN)
-    
+    """Get all seeker data for dashboard. Owner/admin/company."""
     try:
-        profile = SeekerProfile.objects.get(user_account_id=user_id)
-        education = EducationData.objects.filter(user_account_id=user_id)
-        experience = ExperienceData.objects.filter(user_account_id=user_id)
-        skills = SeekerSkillSet.objects.filter(user_account_id=user_id)
-        
-        return Response({
-            'profile': SeekerProfileSerializer(profile).data,
-            'education': EducationDataSerializer(education, many=True).data,
-            'experience': ExperienceDataSerializer(experience, many=True).data,
-            'skills': SeekerSkillSetSerializer(skills, many=True).data,
-        })
-    except SeekerProfile.DoesNotExist:
-        return Response({
-            'error': 'Profile not found'
-        }, status=status.HTTP_404_NOT_FOUND)
+        data = services.build_seeker_dashboard(request.user, user_id)
+    except services.DashboardPermissionError as e:
+        return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+    except services.ProfileNotFoundError as e:
+        return Response({'error': str(e)}, status=status.HTTP_404_NOT_FOUND)
+    return Response(data)

@@ -275,6 +275,116 @@ class JobPostSalaryConstraintTests(APITestCase):
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
 
 
+from apps.jobs import services as jobs_services
+
+
+class JobsServiceTests(APITestCase):
+    def setUp(self):
+        self.seeker = UserAccount.objects.create_user(
+            email="svc-seeker@example.com", password="Str0ng-Password!",
+            user_type="job_seeker")
+        self.other_seeker = UserAccount.objects.create_user(
+            email="svc-other@example.com", password="Str0ng-Password!",
+            user_type="job_seeker")
+        self.company_user = UserAccount.objects.create_user(
+            email="svc-co@example.com", password="Str0ng-Password!",
+            user_type="company")
+        stream = BusinessStream.objects.create(business_stream_name="Svc Tech")
+        company = self.company_user.company_profile
+        company.company_name = "SvcCo"
+        company.business_stream = stream
+        company.save()
+        jt = JobType.objects.create(job_type_name="Svc FT")
+        loc = JobLocation.objects.create(city="SvcCity", country="PH")
+        self.job = JobPost.objects.create(
+            company=company, job_type=jt, job_location=loc,
+            job_title="Svc Job", job_description="...")
+
+    def test_apply_for_job_rejects_company_user(self):
+        with self.assertRaises(jobs_services.InvalidApplicantError):
+            jobs_services.apply_for_job(
+                self.company_user,
+                str(self.job.id),
+                user_account_id=str(self.company_user.id),
+            )
+
+    def test_apply_for_job_requires_user_account_in_body(self):
+        # Omitting user_account_id must raise; preserves pre-Tier-2 behaviour
+        # where the view 403'd because str(None) != str(user.id).
+        with self.assertRaises(jobs_services.InvalidApplicantError):
+            jobs_services.apply_for_job(
+                self.seeker,
+                str(self.job.id),
+                user_account_id=None,
+            )
+
+    def test_apply_for_job_rejects_mismatched_user_account(self):
+        with self.assertRaises(jobs_services.InvalidApplicantError):
+            jobs_services.apply_for_job(
+                self.seeker,
+                str(self.job.id),
+                user_account_id=str(self.other_seeker.id),
+            )
+
+    def test_apply_for_job_happy_path(self):
+        activity = jobs_services.apply_for_job(
+            self.seeker,
+            str(self.job.id),
+            user_account_id=str(self.seeker.id),
+            cover_letter="hi",
+        )
+        self.assertEqual(activity.user_account_id, self.seeker.id)
+        self.assertEqual(activity.cover_letter, "hi")
+
+    def test_apply_for_job_duplicate_raises_already_applied(self):
+        jobs_services.apply_for_job(
+            self.seeker, str(self.job.id),
+            user_account_id=str(self.seeker.id),
+        )
+        with self.assertRaises(jobs_services.AlreadyAppliedError):
+            jobs_services.apply_for_job(
+                self.seeker, str(self.job.id),
+                user_account_id=str(self.seeker.id),
+            )
+
+    def test_apply_for_job_unknown_job_raises(self):
+        with self.assertRaises(jobs_services.JobNotAvailableError):
+            jobs_services.apply_for_job(
+                self.seeker,
+                "00000000-0000-0000-0000-000000000000",
+                user_account_id=str(self.seeker.id),
+            )
+
+
+class ApplyEndpointContractTests(APITestCase):
+    """Regression tests guaranteeing the /apply/ endpoint behaviour survives Tier 2."""
+
+    def setUp(self):
+        self.seeker = UserAccount.objects.create_user(
+            email="contract-seeker@example.com", password="Str0ng-Password!",
+            user_type="job_seeker")
+        co_user = UserAccount.objects.create_user(
+            email="contract-co@example.com", password="Str0ng-Password!",
+            user_type="company")
+        stream = BusinessStream.objects.create(business_stream_name="Contract Tech")
+        company = co_user.company_profile
+        company.company_name = "ContractCo"
+        company.business_stream = stream
+        company.save()
+        jt = JobType.objects.create(job_type_name="Contract FT")
+        loc = JobLocation.objects.create(city="C", country="PH")
+        self.job = JobPost.objects.create(
+            company=company, job_type=jt, job_location=loc,
+            job_title="C Job", job_description="...")
+        _auth(self.client, self.seeker)
+
+    def test_apply_endpoint_returns_403_when_user_account_missing(self):
+        r = self.client.post("/api/v1/jobs/apply/", {
+            "job_post": str(self.job.id),
+        }, format="json")
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+
+
 class JobPostQueryCountTests(APITestCase):
     def setUp(self):
         owner = UserAccount.objects.create_user(

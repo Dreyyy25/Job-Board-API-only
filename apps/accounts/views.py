@@ -1,15 +1,12 @@
+from django.contrib.auth.hashers import make_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import viewsets, status
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.throttling import AnonRateThrottle
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
-from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework_simplejwt.exceptions import TokenError
-from rest_framework_simplejwt.tokens import RefreshToken as SimpleJWTRefreshToken
-from django.contrib.auth.hashers import make_password, check_password
-from django.db import transaction
-from django.utils import timezone
 
+from . import services
 from .models import UserAccount
 from .serializers import UserAccountSerializer, RegisterSerializer
 from .authentication import CustomJWTAuthentication
@@ -64,91 +61,86 @@ class UserAccountViewSet(viewsets.ModelViewSet):
             serializer.save()
 
 # Registration endpoint
+def _serialize_profile(user):
+    """Serialize the signal-created profile for the register response.
+
+    Lazy imports keep apps.accounts at the root of the dependency graph
+    (no module-top cross-app imports). Uses getattr for defense in depth
+    — never 500s if the reverse OneToOne is missing.
+    """
+    if user.user_type == 'job_seeker':
+        from apps.seekers.serializers import SeekerProfileSerializer
+        profile = getattr(user, 'seeker_profile', None)
+        return SeekerProfileSerializer(profile).data if profile else None
+    if user.user_type == 'company':
+        from apps.companies.serializers import CompanySerializer
+        profile = getattr(user, 'company_profile', None)
+        return CompanySerializer(profile).data if profile else None
+    return None
+
+
 @api_view(['POST'])
 @permission_classes([AllowAny])
 @throttle_classes([RegisterThrottle])
-@transaction.atomic
 def register(request):
-    """Register a new user account"""
+    """Register a new user account."""
     serializer = RegisterSerializer(data=request.data)
-    if serializer.is_valid():
-        user = serializer.save()
-        refresh = RefreshToken.for_user(user)
-        refresh['user_id'] = str(user.id)
-        refresh['email'] = user.email
-        refresh['user_type'] = user.user_type
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-        # Serialize the signal-created profile. Lazy imports keep apps.accounts
-        # at the root of the dependency graph (no module-top cross-app imports).
-        profile_data = None
-        if user.user_type == 'job_seeker':
-            from apps.seekers.serializers import SeekerProfileSerializer
-            profile = getattr(user, 'seeker_profile', None)
-            if profile is not None:
-                profile_data = SeekerProfileSerializer(profile).data
-        elif user.user_type == 'company':
-            from apps.companies.serializers import CompanySerializer
-            profile = getattr(user, 'company_profile', None)
-            if profile is not None:
-                profile_data = CompanySerializer(profile).data
+    data = serializer.validated_data
+    try:
+        user, tokens = services.register_user(
+            email=data['email'],
+            password=data['password'],
+            user_type=data['user_type'],
+            **{k: v for k, v in data.items()
+               if k not in {'email', 'password', 'user_type'}},
+        )
+    except DjangoValidationError as e:
+        return Response({'password': list(e.messages)},
+                        status=status.HTTP_400_BAD_REQUEST)
 
-        return Response({
-            'message': 'User created successfully',
-            'user': {
-                'id': str(user.id),
-                'email': user.email,
-                'user_type': user.user_type,
-            },
-            'tokens': {
-                'refresh': str(refresh),
-                'access': str(refresh.access_token),
-            },
-            'profile': profile_data,
-        }, status=status.HTTP_201_CREATED)
-    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    return Response({
+        'message': 'User created successfully',
+        'user': {
+            'id': str(user.id),
+            'email': user.email,
+            'user_type': user.user_type,
+        },
+        'tokens': tokens,
+        'profile': _serialize_profile(user),
+    }, status=status.HTTP_201_CREATED)
+
 
 # Login endpoint
 @api_view(['POST'])
 @permission_classes([AllowAny])
 @throttle_classes([LoginThrottle])
 def login(request):
-    """Login for UserAccount model"""
+    """Login for UserAccount model."""
     email = request.data.get('email')
     password = request.data.get('password')
-    
-    if not email or not password:
-        return Response({
-            'error': 'Email and password are required'
-        }, status=status.HTTP_400_BAD_REQUEST)
-    
-    try:
-        user = UserAccount.objects.get(email=email)
-        if check_password(password, user.password):
-            user.last_login = timezone.now()
-            user.save(update_fields=['last_login'])
 
-            # Use built-in RefreshToken.for_user()
-            refresh = RefreshToken.for_user(user)
-            refresh['user_id'] = str(user.id)
-            refresh['email'] = user.email
-            refresh['user_type'] = user.user_type
-            
-            return Response({
-                'message': 'Login successful',
-                'user': {
-                    'id': str(user.id),
-                    'email': user.email,
-                    'user_type': user.user_type
-                },
-                'tokens': {
-                    'refresh': str(refresh),
-                    'access': str(refresh.access_token),
-                }
-            }, status=status.HTTP_200_OK)
-        else:
-            return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
-    except UserAccount.DoesNotExist:
-        return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
+    if not email or not password:
+        return Response({'error': 'Email and password are required'},
+                        status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        user, tokens = services.login_user(email, password)
+    except services.InvalidCredentialsError:
+        return Response({'error': 'Invalid credentials'},
+                        status=status.HTTP_401_UNAUTHORIZED)
+
+    return Response({
+        'message': 'Login successful',
+        'user': {
+            'id': str(user.id),
+            'email': user.email,
+            'user_type': user.user_type,
+        },
+        'tokens': tokens,
+    }, status=status.HTTP_200_OK)
 
 # Current user's account endpoint
 @api_view(['GET', 'PUT', 'PATCH'])
@@ -180,13 +172,10 @@ def me(request):
 @permission_classes([IsAuthenticated])
 def logout(request):
     """Blacklist the supplied refresh token."""
-    token = request.data.get('refresh')
-    if not token:
-        return Response({'error': 'refresh token required'},
-                        status=status.HTTP_400_BAD_REQUEST)
     try:
-        SimpleJWTRefreshToken(token).blacklist()
-    except TokenError:
-        return Response({'error': 'invalid or expired refresh token'},
+        services.logout_user(request.data.get('refresh'))
+    except services.InvalidTokenError as e:
+        msg = str(e) or 'invalid or expired refresh token'
+        return Response({'error': msg},
                         status=status.HTTP_400_BAD_REQUEST)
     return Response(status=status.HTTP_205_RESET_CONTENT)

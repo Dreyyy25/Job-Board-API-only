@@ -3,6 +3,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from apps.accounts.authentication import CustomJWTAuthentication
+from . import services
 from .models import BusinessStream, Company, CompanyImages
 from .serializers import BusinessStreamSerializer, CompanySerializer, CompanyImagesSerializer
 from .permissions import (
@@ -37,24 +38,14 @@ class CompanyViewSet(viewsets.ModelViewSet):
     permission_classes = [IsCompanyOwnerOrAdmin]
     
     def get_queryset(self):
-        """
-        Filter queryset based on user type:
-        - Admins see all companies
-        - Company users see only their own company
-        - Job seekers see all active companies
-        """
+        """Admins → all; company → their own; else → active companies."""
+        qs = Company.objects.with_related()
         user = self.request.user
-        base = (
-            Company.objects
-            .select_related('user_account', 'business_stream')
-            .prefetch_related('images')
-        )
         if user.is_staff or user.is_superuser:
-            return base
-        elif user.user_type == 'company':
-            return base.filter(user_account=user)
-        else:
-            return base.filter(status='active')
+            return qs
+        if user.user_type == 'company':
+            return qs.for_user(user)
+        return qs.active()
     
     def perform_create(self, serializer):
         """Automatically assign the current user as the company owner.
@@ -86,45 +77,24 @@ class CompanyImagesViewSet(viewsets.ModelViewSet):
     permission_classes = [IsCompanyOwnerForImages]
     
     def get_queryset(self):
-        """
-        Filter queryset based on user:
-        - Admins see all images
-        - Company users see only their company's images
-        - Others see images from active companies
-        """
+        """Admins → all; company → their own; else → active companies' images."""
+        qs = CompanyImages.objects.with_related()
         user = self.request.user
-        base = CompanyImages.objects.select_related('company', 'company__user_account')
         if user.is_staff or user.is_superuser:
-            return base
-        elif user.user_type == 'company':
-            return base.filter(company__user_account=user)
-        else:
-            return base.filter(company__status='active')
+            return qs
+        if user.user_type == 'company':
+            return qs.for_company_user(user)
+        return qs.for_active_companies()
 
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def company_dashboard(request, user_id):
-    """
-    Get company data for dashboard.
-    - Company owners can access their own dashboard
-    - Admins can access any company dashboard
-    """
-    # Security check: verify user can access this dashboard
-    if not (request.user.is_staff or request.user.is_superuser or str(request.user.id) == str(user_id)):
-        return Response({
-            'error': 'You do not have permission to access this dashboard'
-        }, status=status.HTTP_403_FORBIDDEN)
-    
+    """Get company data for dashboard. Owner/admin only."""
     try:
-        company = Company.objects.get(user_account_id=user_id)
-        images = CompanyImages.objects.filter(company=company)
-        
-        return Response({
-            'company': CompanySerializer(company).data,
-            'images': CompanyImagesSerializer(images, many=True).data,
-        })
-    except Company.DoesNotExist:
-        return Response({
-            'error': 'Company not found'
-        }, status=status.HTTP_404_NOT_FOUND)
+        data = services.build_company_dashboard(request.user, user_id)
+    except services.DashboardPermissionError as e:
+        return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
+    except services.CompanyNotFoundError as e:
+        return Response({'error': str(e)}, status=status.HTTP_404_NOT_FOUND)
+    return Response(data)
