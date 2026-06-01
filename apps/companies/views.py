@@ -1,3 +1,9 @@
+from drf_spectacular.utils import (
+    OpenApiResponse,
+    extend_schema,
+    inline_serializer,
+)
+from rest_framework import serializers as drf_serializers
 from rest_framework import viewsets, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
@@ -10,6 +16,19 @@ from .permissions import (
     IsAdminOrReadOnly,
     IsCompanyOwnerOrAdmin,
     IsCompanyOwnerForImages
+)
+
+
+_CompanyDashboardSerializer = inline_serializer(
+    name='CompanyDashboard',
+    fields={
+        'company': CompanySerializer(),
+        'images': CompanyImagesSerializer(many=True),
+    },
+)
+
+_CompaniesErrorSerializer = inline_serializer(
+    name='CompaniesError', fields={'error': drf_serializers.CharField()},
 )
 
 # Create your views here.
@@ -87,6 +106,14 @@ class CompanyImagesViewSet(viewsets.ModelViewSet):
         return qs.for_active_companies()
 
 
+@extend_schema(
+    responses={
+        200: _CompanyDashboardSerializer,
+        403: _CompaniesErrorSerializer,
+        404: _CompaniesErrorSerializer,
+    },
+    tags=['companies'],
+)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def company_dashboard(request, user_id):

@@ -436,6 +436,42 @@ class RegisterQueryCountTests(APITestCase):
         )
 
 
+class OpenAPISchemaTests(APITestCase):
+    """drf-spectacular: schema is reachable and lists our endpoints."""
+
+    def test_schema_endpoint_returns_200_and_yaml(self):
+        r = self.client.get('/api/schema/')
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        # Default content type is application/vnd.oai.openapi (YAML).
+        self.assertIn('openapi', r.content[:200].decode('utf-8', errors='replace'))
+
+    def test_swagger_ui_loads(self):
+        r = self.client.get('/api/docs/')
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+
+    def test_schema_includes_key_paths(self):
+        r = self.client.get('/api/schema/?format=json')
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        paths = r.json().get('paths', {})
+        for expected in (
+            '/api/v1/accounts/register/',
+            '/api/v1/accounts/login/',
+            '/api/v1/jobs/job-posts/',
+            '/api/v1/jobs/apply/',
+            '/api/v1/companies/profile/',
+            '/api/v1/seekers/profiles/',
+        ):
+            self.assertIn(expected, paths, f'Missing path: {expected}')
+
+    def test_schema_advertises_jwt_bearer_auth(self):
+        r = self.client.get('/api/schema/?format=json')
+        components = r.json().get('components', {})
+        security_schemes = components.get('securitySchemes', {})
+        self.assertIn('jwtAuth', security_schemes)
+        self.assertEqual(security_schemes['jwtAuth']['scheme'], 'bearer')
+        self.assertEqual(security_schemes['jwtAuth']['bearerFormat'], 'JWT')
+
+
 class SettingsModuleTests(APITestCase):
     """Verify we're running under the test settings module."""
 

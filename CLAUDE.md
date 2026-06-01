@@ -101,6 +101,16 @@ Any ViewSet returning FK data must `select_related(...)`. Any reverse-FK or M2M 
 
 Put env-identical config in `jobApp/settings/base.py`. Put env-differing defaults in `development.py` / `production.py` / `test.py`. Never hardcode secrets or DB credentials anywhere — those stay in `config.py` and are read via `from config import ...`. `production.py` uses hard `assert` statements to fail-fast on missing `ALLOWED_HOSTS` or short `SECRET_KEY`. `manage.py` auto-picks `jobApp.settings.test` when running tests, `jobApp.settings.development` otherwise; `wsgi.py` / `asgi.py` default to `jobApp.settings.production`.
 
+### OpenAPI schema (`drf-spectacular`)
+
+- Live schema (OpenAPI 3): `GET /api/schema/` (YAML) or `?format=json` for JSON.
+- Swagger UI: `GET /api/docs/` — interactive try-it-out console.
+- ReDoc: `GET /api/redoc/`.
+- Auth shows up as `jwtAuth` (HTTP bearer, format JWT) thanks to `apps.accounts.schema_extensions.CustomJWTAuthenticationScheme`, which is registered in `AccountsConfig.ready()`.
+- Function-based views (`register`, `login`, `logout`, `me`, `apply_for_job`, `job_applications`, `user_applications`, `seeker_dashboard`, `company_dashboard`) declare request/response shapes via `@extend_schema(...)` with inline serializers. Keep these in sync when you change a function-view payload — viewsets auto-generate from their serializer_class.
+- Regenerate / validate locally: `uv run python manage.py spectacular --validate`. CI should fail if this emits warnings.
+- Frontend TS types: point your OpenAPI codegen at `http://localhost:8000/api/schema/?format=json`.
+
 ### Reference docs
 
 - `API_DOCUMENTATION.md` — full endpoint catalog with request/response examples.

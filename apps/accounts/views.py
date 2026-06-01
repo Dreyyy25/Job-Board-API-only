@@ -1,5 +1,11 @@
 from django.contrib.auth.hashers import make_password
 from django.core.exceptions import ValidationError as DjangoValidationError
+from drf_spectacular.utils import (
+    OpenApiResponse,
+    extend_schema,
+    inline_serializer,
+)
+from rest_framework import serializers as drf_serializers
 from rest_framework import viewsets, status
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.throttling import AnonRateThrottle
@@ -11,6 +17,53 @@ from .models import UserAccount
 from .serializers import UserAccountSerializer, RegisterSerializer
 from .authentication import CustomJWTAuthentication
 from .permissions import IsOwnerOrAdmin
+
+
+_TokensSerializer = inline_serializer(
+    name='AuthTokens',
+    fields={
+        'refresh': drf_serializers.CharField(),
+        'access': drf_serializers.CharField(),
+    },
+)
+
+_AuthResponseSerializer = inline_serializer(
+    name='AuthResponse',
+    fields={
+        'message': drf_serializers.CharField(),
+        'user': inline_serializer(
+            name='AuthUser',
+            fields={
+                'id': drf_serializers.UUIDField(),
+                'email': drf_serializers.EmailField(),
+                'user_type': drf_serializers.CharField(),
+            },
+        ),
+        'tokens': _TokensSerializer,
+        'profile': drf_serializers.JSONField(
+            help_text='SeekerProfile or Company payload (signal-created).',
+            allow_null=True,
+        ),
+    },
+)
+
+_LoginRequestSerializer = inline_serializer(
+    name='LoginRequest',
+    fields={
+        'email': drf_serializers.EmailField(),
+        'password': drf_serializers.CharField(write_only=True),
+    },
+)
+
+_LogoutRequestSerializer = inline_serializer(
+    name='LogoutRequest',
+    fields={'refresh': drf_serializers.CharField()},
+)
+
+_ErrorSerializer = inline_serializer(
+    name='ErrorResponse',
+    fields={'error': drf_serializers.CharField()},
+)
 
 
 class RegisterThrottle(AnonRateThrottle):
@@ -79,6 +132,15 @@ def _serialize_profile(user):
     return None
 
 
+@extend_schema(
+    request=RegisterSerializer,
+    responses={
+        201: _AuthResponseSerializer,
+        400: OpenApiResponse(description='Validation error or weak password'),
+        429: OpenApiResponse(description='Rate limited (5/min)'),
+    },
+    tags=['accounts'],
+)
 @api_view(['POST'])
 @permission_classes([AllowAny])
 @throttle_classes([RegisterThrottle])
@@ -114,6 +176,16 @@ def register(request):
 
 
 # Login endpoint
+@extend_schema(
+    request=_LoginRequestSerializer,
+    responses={
+        200: _AuthResponseSerializer,
+        400: _ErrorSerializer,
+        401: _ErrorSerializer,
+        429: OpenApiResponse(description='Rate limited (10/min)'),
+    },
+    tags=['accounts'],
+)
 @api_view(['POST'])
 @permission_classes([AllowAny])
 @throttle_classes([LoginThrottle])
@@ -143,6 +215,17 @@ def login(request):
     }, status=status.HTTP_200_OK)
 
 # Current user's account endpoint
+@extend_schema(
+    methods=['GET'],
+    responses={200: UserAccountSerializer},
+    tags=['accounts'],
+)
+@extend_schema(
+    methods=['PUT', 'PATCH'],
+    request=UserAccountSerializer,
+    responses={200: UserAccountSerializer, 400: _ErrorSerializer},
+    tags=['accounts'],
+)
 @api_view(['GET', 'PUT', 'PATCH'])
 @permission_classes([IsAuthenticated])
 def me(request):
@@ -168,6 +251,14 @@ def me(request):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 # Logout endpoint
+@extend_schema(
+    request=_LogoutRequestSerializer,
+    responses={
+        205: OpenApiResponse(description='Token blacklisted'),
+        400: _ErrorSerializer,
+    },
+    tags=['accounts'],
+)
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def logout(request):

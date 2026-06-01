@@ -7,3 +7,4 @@ class AccountsConfig(AppConfig):
 
     def ready(self):
         from . import signals  # noqa: F401
+        from . import schema_extensions  # noqa: F401

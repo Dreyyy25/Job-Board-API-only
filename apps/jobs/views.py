@@ -1,3 +1,10 @@
+from drf_spectacular.utils import (
+    OpenApiParameter,
+    OpenApiResponse,
+    extend_schema,
+    inline_serializer,
+)
+from rest_framework import serializers as drf_serializers
 from rest_framework import viewsets, status
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.permissions import IsAuthenticated
@@ -18,6 +25,32 @@ from .permissions import (
     IsJobPosterOrAdmin,
     IsApplicantOrCompanyOrAdmin,
     CanManageJobSkills
+)
+
+
+_ApplyRequestSerializer = inline_serializer(
+    name='ApplyForJobRequest',
+    fields={
+        'user_account': drf_serializers.UUIDField(
+            help_text='Must match the authenticated user; preserves the existing API contract.',
+        ),
+        'job_post': drf_serializers.UUIDField(),
+        'cover_letter': drf_serializers.CharField(
+            required=False, allow_blank=True,
+        ),
+    },
+)
+
+_ApplyResponseSerializer = inline_serializer(
+    name='ApplyForJobResponse',
+    fields={
+        'message': drf_serializers.CharField(),
+        'data': JobPostActivitySerializer(),
+    },
+)
+
+_JobsErrorSerializer = inline_serializer(
+    name='JobsError', fields={'error': drf_serializers.CharField()},
 )
 
 
@@ -153,6 +186,17 @@ class JobPostSkillSetViewSet(viewsets.ModelViewSet):
         return qs.for_published_jobs()
 
 
+@extend_schema(
+    request=_ApplyRequestSerializer,
+    responses={
+        201: _ApplyResponseSerializer,
+        400: _JobsErrorSerializer,
+        403: _JobsErrorSerializer,
+        404: _JobsErrorSerializer,
+        429: OpenApiResponse(description='Burst-throttled (60/min)'),
+    },
+    tags=['jobs'],
+)
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 @throttle_classes([AnonRateThrottle, UserRateThrottle, BurstRateThrottle])
@@ -180,6 +224,14 @@ def apply_for_job(request):
     }, status=status.HTTP_201_CREATED)
 
 
+@extend_schema(
+    responses={
+        200: JobPostActivitySerializer(many=True),
+        403: _JobsErrorSerializer,
+        404: _JobsErrorSerializer,
+    },
+    tags=['jobs'],
+)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def job_applications(request, job_id):
@@ -194,6 +246,13 @@ def job_applications(request, job_id):
     return Response(JobPostActivitySerializer(apps_qs, many=True).data)
 
 
+@extend_schema(
+    responses={
+        200: JobPostActivitySerializer(many=True),
+        403: _JobsErrorSerializer,
+    },
+    tags=['jobs'],
+)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def user_applications(request, user_id):

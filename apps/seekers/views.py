@@ -1,3 +1,9 @@
+from drf_spectacular.utils import (
+    OpenApiResponse,
+    extend_schema,
+    inline_serializer,
+)
+from rest_framework import serializers as drf_serializers
 from rest_framework import viewsets, status
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
@@ -13,6 +19,21 @@ from .permissions import (
     IsSeekerOwnerOrAdmin,
     IsAdminOrReadOnly,
     CanManageSeekerSkills
+)
+
+
+_SeekerDashboardSerializer = inline_serializer(
+    name='SeekerDashboard',
+    fields={
+        'profile': SeekerProfileSerializer(),
+        'education': EducationDataSerializer(many=True),
+        'experience': ExperienceDataSerializer(many=True),
+        'skills': SeekerSkillSetSerializer(many=True),
+    },
+)
+
+_SeekersErrorSerializer = inline_serializer(
+    name='SeekersError', fields={'error': drf_serializers.CharField()},
 )
 
 # Create your views here.
@@ -146,6 +167,14 @@ class SeekerSkillSetViewSet(viewsets.ModelViewSet):
         serializer.save(user_account=self.request.user)
 
 
+@extend_schema(
+    responses={
+        200: _SeekerDashboardSerializer,
+        403: _SeekersErrorSerializer,
+        404: _SeekersErrorSerializer,
+    },
+    tags=['seekers'],
+)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def seeker_dashboard(request, user_id):

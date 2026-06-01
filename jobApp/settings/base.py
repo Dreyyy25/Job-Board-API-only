@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
     'django_filters',
+    'drf_spectacular',
     'apps.accounts.apps.AccountsConfig',
     'apps.jobs',
     'apps.seekers',
@@ -78,6 +79,22 @@ REST_FRAMEWORK = {
         'rest_framework.filters.SearchFilter',
         'rest_framework.filters.OrderingFilter',
     ],
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+}
+
+# OpenAPI / Swagger UI / Redoc — see /api/schema/, /api/docs/, /api/redoc/.
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'Job Board API',
+    'DESCRIPTION': (
+        'REST API for a Job Board platform built on Django + DRF with JWT auth, '
+        'custom UserAccount model (UUID PKs, user_type job_seeker/company), '
+        'auto-created profiles via post_save signal, layered throttling, and '
+        'Argon2 password hashing.'
+    ),
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    'COMPONENT_SPLIT_REQUEST': True,
+    'SCHEMA_PATH_PREFIX': '/api/v1/',
 }
 
 # JWT Settings
