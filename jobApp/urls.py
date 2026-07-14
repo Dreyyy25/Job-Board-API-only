@@ -32,6 +32,7 @@ urlpatterns = [
     path('api/v1/jobs/', include('apps.jobs.urls')),
     path('api/v1/seekers/', include('apps.seekers.urls')),
     path('api/v1/companies/', include('apps.companies.urls')),
+    path('api/v1/ai/', include('apps.ai.urls')),
 
     # OpenAPI 3 schema + interactive UIs.
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),

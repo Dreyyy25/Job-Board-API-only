@@ -34,5 +34,7 @@ REST_FRAMEWORK = {
         'anon': '100000/day',
         'user': '100000/day',
         'burst': '100000/day',
+        'ai': '100000/day',
+        'ai-chat': '100000/day',
     },
 }

@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     'apps.jobs',
     'apps.seekers',
     'apps.companies',
+    'apps.ai',
 ]
 
 AUTH_USER_MODEL = 'accounts.UserAccount'
@@ -73,6 +74,8 @@ REST_FRAMEWORK = {
         'register': '5/min',
         'login': '10/min',
         'token_refresh': '20/min',
+        'ai': '30/min',
+        'ai-chat': '10/min',
     },
     'DEFAULT_FILTER_BACKENDS': [
         'django_filters.rest_framework.DjangoFilterBackend',
