@@ -325,3 +325,64 @@ class JobPostAssistEndpointTests(APITestCase):
         self.assertEqual(
             views.job_post_assist.cls.throttle_classes,
             [AnonRateThrottle, UserRateThrottle, BurstRateThrottle, AIRateThrottle])
+
+
+class ResumeSchemaTests(TestCase):
+    def test_resume_extract_validates_and_mirrors_model_fields(self):
+        from apps.ai.schemas import ResumeExtract
+        extract = ResumeExtract(
+            education=[{
+                "institute_university_name": "MIT",
+                "degree_type": "Bachelor",
+                "field_of_study": "CS",
+                "academic_details": "",
+                "percentage": 92.5,
+                "start_date": "2018-06-01",
+                "end_date": None,
+            }],
+            experience=[{
+                "company_name": "Acme",
+                "position": "Dev",
+                "description": "Built APIs",
+                "job_location_city": "Manila",
+                "job_location_country": "PH",
+                "start_date": None,
+                "end_date": None,
+            }],
+            skills=[{"skill_name": "Python", "skill_level": "Advanced"}],
+        )
+        dumped = extract.education[0].model_dump()
+        # Keys must match EducationData model fields so the frontend can POST
+        # the confirmed draft to the existing seekers CRUD endpoints unchanged.
+        self.assertEqual(
+            set(dumped),
+            {"institute_university_name", "degree_type", "field_of_study",
+             "academic_details", "percentage", "start_date", "end_date"})
+
+    def test_bad_degree_type_rejected(self):
+        from pydantic import ValidationError
+        from apps.ai.schemas import EducationEntry
+        with self.assertRaises(ValidationError):
+            EducationEntry(
+                institute_university_name="X", degree_type="Ninja",
+                field_of_study="", academic_details="", percentage=None,
+                start_date=None, end_date=None)
+
+    def test_bad_skill_level_rejected(self):
+        from pydantic import ValidationError
+        from apps.ai.schemas import ResumeSkill
+        with self.assertRaises(ValidationError):
+            ResumeSkill(skill_name="Python", skill_level="Ninja")
+
+
+class IsSeekerUserTests(TestCase):
+    def test_gates_by_user_type(self):
+        from unittest.mock import Mock
+        from apps.ai.permissions import IsSeekerUser
+        perm = IsSeekerUser()
+        seeker = Mock(is_authenticated=True, user_type="job_seeker")
+        company = Mock(is_authenticated=True, user_type="company")
+        anon = Mock(is_authenticated=False, user_type=None)
+        self.assertTrue(perm.has_permission(Mock(user=seeker), None))
+        self.assertFalse(perm.has_permission(Mock(user=company), None))
+        self.assertFalse(perm.has_permission(Mock(user=anon), None))

@@ -24,3 +24,52 @@ class JobPostDraft(BaseModel):
         description="Full description including responsibilities and requirements prose.")
     suggested_skills: list[SuggestedSkillDraft] = Field(
         description="3-8 skills strictly from the provided taxonomy list.")
+
+
+DegreeType = Literal[
+    'High School', 'Associate', 'Bachelor', 'Master', 'PhD',
+    'Certificate', 'Diploma',
+]
+
+# Date fields are plain str, NOT datetime.date: langchain-google-genai strips
+# `format` from schemas before they reach Gemini, so the ISO rule must live in
+# the description. Field names mirror the Django models so confirmed drafts
+# POST straight to the existing seekers CRUD endpoints.
+
+
+class EducationEntry(BaseModel):
+    institute_university_name: str = Field(description="Institution name as written in the resume.")
+    degree_type: DegreeType | None = Field(
+        description="Closest matching degree type, or null if unclear.")
+    field_of_study: str = Field(description="Major/field, empty string if absent.")
+    academic_details: str = Field(description="Honors, thesis, or notes; empty string if absent.")
+    percentage: float | None = Field(
+        description="Grade as a 0-100 number ONLY if explicitly stated, else null.")
+    start_date: str | None = Field(
+        description="ISO date YYYY-MM-DD; year-only becomes YYYY-01-01; null if absent.")
+    end_date: str | None = Field(
+        description="ISO date YYYY-MM-DD; year-only becomes YYYY-01-01; null if absent or ongoing.")
+
+
+class ExperienceEntry(BaseModel):
+    company_name: str = Field(description="Employer name as written.")
+    position: str = Field(description="Job title as written.")
+    description: str = Field(description="Responsibilities/achievements; empty string if absent.")
+    job_location_city: str = Field(description="City, empty string if absent.")
+    job_location_country: str = Field(description="Country, empty string if absent.")
+    start_date: str | None = Field(
+        description="ISO date YYYY-MM-DD; year-only becomes YYYY-01-01; null if absent.")
+    end_date: str | None = Field(
+        description="ISO date YYYY-MM-DD; null if absent or current role.")
+
+
+class ResumeSkill(BaseModel):
+    skill_name: str = Field(description="One skill as named in the resume.")
+    skill_level: SkillLevel = Field(
+        description="Proficiency estimated from context; Intermediate when unclear.")
+
+
+class ResumeExtract(BaseModel):
+    education: list[EducationEntry] = Field(description="All education records found.")
+    experience: list[ExperienceEntry] = Field(description="All work experience found.")
+    skills: list[ResumeSkill] = Field(description="All identifiable skills.")

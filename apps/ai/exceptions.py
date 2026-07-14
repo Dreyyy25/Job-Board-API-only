@@ -15,3 +15,8 @@ class AIResponseInvalidError(Exception):
 
 class CompanyProfileMissingError(Exception):
     """Company-type user has no Company row (e.g. deleted after signup) → HTTP 400."""
+
+
+class InvalidResumeFileError(Exception):
+    """Resume upload rejected: wrong type, over size cap, unreadable, or
+    not exactly one of text/file → HTTP 400."""
