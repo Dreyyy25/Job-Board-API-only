@@ -386,3 +386,25 @@ class IsSeekerUserTests(TestCase):
         self.assertTrue(perm.has_permission(Mock(user=seeker), None))
         self.assertFalse(perm.has_permission(Mock(user=company), None))
         self.assertFalse(perm.has_permission(Mock(user=anon), None))
+
+
+class ResumePromptTests(TestCase):
+    def test_text_message_carries_resume_text(self):
+        from apps.ai.prompts import build_resume_import_messages
+        msgs = build_resume_import_messages(resume_text="my resume text")
+        self.assertEqual(msgs[0][0], "system")
+        human = msgs[-1]
+        self.assertEqual(len(human.content), 1)
+        self.assertEqual(human.content[0]["type"], "text")
+        self.assertIn("my resume text", human.content[0]["text"])
+
+    def test_pdf_message_carries_inline_file_block(self):
+        from apps.ai.prompts import build_resume_import_messages
+        msgs = build_resume_import_messages(pdf_b64="QUJD")
+        human = msgs[-1]
+        block = human.content[0]
+        self.assertEqual(block["type"], "file")
+        self.assertEqual(block["source_type"], "base64")
+        self.assertEqual(block["mime_type"], "application/pdf")
+        self.assertEqual(block["data"], "QUJD")
+        self.assertEqual(human.content[1]["type"], "text")
