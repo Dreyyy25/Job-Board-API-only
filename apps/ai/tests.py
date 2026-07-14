@@ -28,3 +28,22 @@ class AIUsageLogTests(TestCase):
         user.delete()
         row.refresh_from_db()
         self.assertIsNone(row.user)
+
+
+class ModelFactoryTests(TestCase):
+    def test_flash_tier_uses_configured_model(self):
+        import config
+        from apps.ai.llm import get_model
+        model = get_model('flash')
+        # ChatGoogleGenerativeAI normalises to 'models/<id>'
+        self.assertIn(config.AI_MODEL_FLASH, model.model)
+
+    def test_pro_tier_uses_configured_model(self):
+        import config
+        from apps.ai.llm import get_model
+        self.assertIn(config.AI_MODEL_PRO, get_model('pro').model)
+
+    def test_unknown_tier_raises(self):
+        from apps.ai.llm import get_model
+        with self.assertRaises(ValueError):
+            get_model('turbo')
