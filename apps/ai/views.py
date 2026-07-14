@@ -15,9 +15,10 @@ from .exceptions import (
     AIQuotaExceededError,
     AIResponseInvalidError,
     CompanyProfileMissingError,
+    InvalidResumeFileError,
 )
-from .permissions import IsCompanyUser
-from .serializers import JobPostAssistRequestSerializer
+from .permissions import IsCompanyUser, IsSeekerUser
+from .serializers import JobPostAssistRequestSerializer, ResumeImportRequestSerializer
 
 _AIErrorSerializer = inline_serializer(
     name='AIError', fields={'error': drf_serializers.CharField()},
@@ -74,6 +75,90 @@ def job_post_assist(request):
         return Response(
             {'error': 'You must complete your company profile before using the AI writer'},
             status=status.HTTP_400_BAD_REQUEST)
+    except AIQuotaExceededError:
+        return Response({'error': 'AI provider quota exceeded — try again later'},
+                        status=status.HTTP_429_TOO_MANY_REQUESTS)
+    except (AIProviderError, AIResponseInvalidError):
+        return Response({'error': 'AI provider unavailable — try again later'},
+                        status=status.HTTP_502_BAD_GATEWAY)
+    return Response(draft)
+
+
+_EducationEntrySerializer = inline_serializer(
+    name='ResumeEducationEntry',
+    fields={
+        'institute_university_name': drf_serializers.CharField(),
+        'degree_type': drf_serializers.CharField(allow_null=True),
+        'field_of_study': drf_serializers.CharField(allow_blank=True),
+        'academic_details': drf_serializers.CharField(allow_blank=True),
+        'percentage': drf_serializers.FloatField(allow_null=True),
+        'start_date': drf_serializers.CharField(allow_null=True),
+        'end_date': drf_serializers.CharField(allow_null=True),
+    },
+)
+
+_ExperienceEntrySerializer = inline_serializer(
+    name='ResumeExperienceEntry',
+    fields={
+        'company_name': drf_serializers.CharField(),
+        'position': drf_serializers.CharField(),
+        'description': drf_serializers.CharField(allow_blank=True),
+        'job_location_city': drf_serializers.CharField(allow_blank=True),
+        'job_location_country': drf_serializers.CharField(allow_blank=True),
+        'start_date': drf_serializers.CharField(allow_null=True),
+        'end_date': drf_serializers.CharField(allow_null=True),
+    },
+)
+
+_ResumeSkillSerializer = inline_serializer(
+    name='ResumeSkillOut',
+    fields={
+        'skill_set_id': drf_serializers.UUIDField(),
+        'skill_name': drf_serializers.CharField(),
+        'skill_level': drf_serializers.CharField(),
+    },
+)
+
+_ResumeImportResponseSerializer = inline_serializer(
+    name='ResumeImportResponse',
+    fields={
+        # inline_serializer returns an instance; recover the class to build the many=True list
+        'education': type(_EducationEntrySerializer)(many=True),
+        'experience': type(_ExperienceEntrySerializer)(many=True),
+        'skills': type(_ResumeSkillSerializer)(many=True),
+        'new_skill_suggestions': drf_serializers.ListField(
+            child=drf_serializers.CharField()),
+    },
+)
+
+
+@extend_schema(
+    request=ResumeImportRequestSerializer,
+    responses={
+        200: _ResumeImportResponseSerializer,
+        400: _AIErrorSerializer,
+        401: _AIErrorSerializer,
+        403: _AIErrorSerializer,
+        429: _AIErrorSerializer,
+        502: _AIErrorSerializer,
+    },
+    tags=['ai'],
+)
+@api_view(['POST'])
+@permission_classes([IsSeekerUser])
+@throttle_classes([AnonRateThrottle, UserRateThrottle, BurstRateThrottle, AIRateThrottle])
+def resume_import(request):
+    """Extract a structured draft from a resume. Returns a draft — creates nothing."""
+    serializer = ResumeImportRequestSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    try:
+        draft = services.extract_resume(
+            request.user,
+            text=serializer.validated_data.get('text', ''),
+            file=serializer.validated_data.get('file'),
+        )
+    except InvalidResumeFileError as e:
+        return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
     except AIQuotaExceededError:
         return Response({'error': 'AI provider quota exceeded — try again later'},
                         status=status.HTTP_429_TOO_MANY_REQUESTS)

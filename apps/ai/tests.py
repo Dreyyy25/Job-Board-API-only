@@ -512,3 +512,102 @@ class ExtractResumeTests(TestCase):
         result = extract_resume(self.seeker, file=self._pdf(),
                                 model=FakeStructuredChatModel([self._extract()]))
         self.assertEqual(result["skills"], [])
+
+
+class ResumeImportEndpointTests(APITestCase):
+    URL = "/api/v1/ai/resume-import/"
+
+    def setUp(self):
+        from apps.seekers.models import SkillSet
+        self.seeker = UserAccount.objects.create_user(
+            email="rs@example.com", password="Str0ng-Password!",
+            user_type="job_seeker")
+        self.company_user = UserAccount.objects.create_user(
+            email="rc@example.com", password="Str0ng-Password!",
+            user_type="company")
+        self.python = SkillSet.objects.create(skill_name="Python")
+
+    def _fake(self, *items):
+        from apps.ai.testing import FakeStructuredChatModel
+        return FakeStructuredChatModel(list(items))
+
+    def _ok_extract(self):
+        from apps.ai.schemas import ResumeExtract
+        return ResumeExtract(
+            education=[], experience=[],
+            skills=[{"skill_name": "Python", "skill_level": "Advanced"},
+                    {"skill_name": "Kubernetes", "skill_level": "Expert"}])
+
+    def test_anonymous_gets_401(self):
+        r = self.client.post(self.URL, {"text": "resume"})
+        self.assertEqual(r.status_code, 401)
+
+    def test_company_gets_403(self):
+        _auth(self.client, self.company_user)
+        r = self.client.post(self.URL, {"text": "resume"})
+        self.assertEqual(r.status_code, 403)
+
+    def test_seeker_gets_draft_with_mapped_and_new_skills(self):
+        _auth(self.client, self.seeker)
+        with patch("apps.ai.services.get_model",
+                   return_value=self._fake(self._ok_extract())):
+            r = self.client.post(self.URL, {"text": "my resume"})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data["skills"][0]["skill_set_id"], str(self.python.id))
+        self.assertEqual(r.data["new_skill_suggestions"], ["Kubernetes"])
+
+    def test_pdf_upload_works(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        _auth(self.client, self.seeker)
+        pdf = SimpleUploadedFile("r.pdf", b"%PDF-1.4 fake",
+                                 content_type="application/pdf")
+        with patch("apps.ai.services.get_model",
+                   return_value=self._fake(self._ok_extract())):
+            r = self.client.post(self.URL, {"file": pdf}, format="multipart")
+        self.assertEqual(r.status_code, 200)
+
+    def test_both_text_and_file_gets_400(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        _auth(self.client, self.seeker)
+        pdf = SimpleUploadedFile("r.pdf", b"%PDF-1.4 fake",
+                                 content_type="application/pdf")
+        r = self.client.post(self.URL, {"text": "resume", "file": pdf},
+                             format="multipart")
+        self.assertEqual(r.status_code, 400)
+
+    def test_neither_gets_400(self):
+        _auth(self.client, self.seeker)
+        r = self.client.post(self.URL, {})
+        self.assertEqual(r.status_code, 400)
+
+    def test_non_pdf_gets_400(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        _auth(self.client, self.seeker)
+        bad = SimpleUploadedFile("r.pdf", b"NOTAPDF",
+                                 content_type="application/pdf")
+        r = self.client.post(self.URL, {"file": bad}, format="multipart")
+        self.assertEqual(r.status_code, 400)
+
+    def test_quota_error_maps_to_429(self):
+        _auth(self.client, self.seeker)
+        boom = RuntimeError("429 RESOURCE_EXHAUSTED")
+        with patch("apps.ai.services.get_model", return_value=self._fake(boom)):
+            r = self.client.post(self.URL, {"text": "resume"})
+        self.assertEqual(r.status_code, 429)
+
+    def test_provider_error_maps_to_502(self):
+        _auth(self.client, self.seeker)
+        with patch("apps.ai.services.get_model",
+                   return_value=self._fake(RuntimeError("boom"),
+                                           RuntimeError("boom"))):
+            r = self.client.post(self.URL, {"text": "resume"})
+        self.assertEqual(r.status_code, 502)
+
+    def test_throttle_classes_are_the_four_layer_stack(self):
+        from apps.ai import views
+        from apps.ai.throttling import AIRateThrottle
+        from jobApp.throttling import BurstRateThrottle
+        from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
+        self.assertEqual(
+            views.resume_import.cls.throttle_classes,
+            [AnonRateThrottle, UserRateThrottle, BurstRateThrottle, AIRateThrottle])
