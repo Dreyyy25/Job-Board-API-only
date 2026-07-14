@@ -13,6 +13,7 @@ from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.filters import SearchFilter, OrderingFilter
 from apps.accounts.authentication import CustomJWTAuthentication
+from jobApp.throttling import BurstRateThrottle
 from . import services
 from .filters import JobPostFilter
 from .models import JobType, JobLocation, JobPost, JobPostActivity, JobPostSkillSet
@@ -53,15 +54,6 @@ _JobsErrorSerializer = inline_serializer(
     name='JobsError', fields={'error': drf_serializers.CharField()},
 )
 
-
-class BurstRateThrottle(UserRateThrottle):
-    """Per-user burst ceiling for write-heavy endpoints.
-
-    Inherits UserRateThrottle so anonymous requests are not burst-throttled
-    (get_cache_key returns None for anon). Anon traffic is bounded by the
-    default AnonRateThrottle (100/day).
-    """
-    scope = 'burst'
 
 # Create your views here.
 class JobTypeViewSet(viewsets.ModelViewSet):
