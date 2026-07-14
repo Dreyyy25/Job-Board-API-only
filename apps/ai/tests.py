@@ -513,6 +513,26 @@ class ExtractResumeTests(TestCase):
                                 model=FakeStructuredChatModel([self._extract()]))
         self.assertEqual(result["skills"], [])
 
+    def test_pdf_at_exact_size_cap_accepted(self):
+        from apps.ai.services import extract_resume
+        from apps.ai.testing import FakeStructuredChatModel
+        content = b"%PDF-" + b"x" * (5 * 1024 * 1024 - 5)
+        self.assertEqual(len(content), 5 * 1024 * 1024)
+        pdf = self._pdf(content=content)
+        result = extract_resume(self.seeker, file=pdf,
+                                model=FakeStructuredChatModel([self._extract()]))
+        self.assertEqual(result["skills"], [])
+
+    def test_degree_type_none_coerced_to_empty_string(self):
+        from apps.ai.services import extract_resume
+        from apps.ai.testing import FakeStructuredChatModel
+        edu = {"institute_university_name": "MIT", "degree_type": None,
+               "field_of_study": "CS", "academic_details": "", "percentage": None,
+               "start_date": "2018-01-01", "end_date": None}
+        fake = FakeStructuredChatModel([self._extract(education=[edu])])
+        result = extract_resume(self.seeker, text="resume", model=fake)
+        self.assertEqual(result["education"][0]["degree_type"], "")
+
 
 class ResumeImportEndpointTests(APITestCase):
     URL = "/api/v1/ai/resume-import/"

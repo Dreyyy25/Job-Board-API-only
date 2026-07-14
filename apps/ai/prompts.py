@@ -57,8 +57,9 @@ def build_resume_import_messages(*, resume_text=None, pdf_b64=None):
     """Messages for resume extraction. Exactly one kwarg is non-None
     (enforced by the service; not re-validated here).
 
-    PDF bytes travel as an inline base64 file content block — the shape
-    langchain-google-genai's own docstring documents for Gemini.
+    PDF bytes travel as an inline base64 data content block (langchain-core's
+    legacy source_type form, handled by is_data_content_block and converted
+    to a Gemini inline_data Part; the v1 form uses a flat 'base64' key).
     """
     if pdf_b64 is not None:
         content = [

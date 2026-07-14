@@ -173,7 +173,7 @@ def extract_resume(user, *, text='', file=None, model=None):
         _record_usage(AIUsageLog.Feature.RESUME_IMPORT, user, model, usage_sink)
 
     by_name = {s.skill_name.lower(): s for s in SkillSet.objects.all()}
-    skills, suggestions, seen = [], [], set()
+    skills, suggestions, seen, seen_suggestions = [], [], set(), set()
     for item in extract.skills:
         name = item.skill_name.strip()
         if not name:
@@ -188,11 +188,23 @@ def extract_resume(user, *, text='', file=None, model=None):
                 'skill_name': skill.skill_name,
                 'skill_level': item.skill_level,
             })
-        elif name.lower() not in {s.lower() for s in suggestions}:
+        elif name.lower() not in seen_suggestions:
+            seen_suggestions.add(name.lower())
             suggestions.append(name)
 
+    education = []
+    for entry in extract.education:
+        dumped = entry.model_dump()
+        # The model's EducationData serializer declares degree_type with
+        # blank=True (not null=True) — None fails validation, so coerce the
+        # LLM's "null if unclear" to the model's own absent representation
+        # before the confirmed draft is POSTed straight to that endpoint.
+        if dumped.get('degree_type') is None:
+            dumped['degree_type'] = ''
+        education.append(dumped)
+
     return {
-        'education': [e.model_dump() for e in extract.education],
+        'education': education,
         'experience': [e.model_dump() for e in extract.experience],
         'skills': skills,
         'new_skill_suggestions': suggestions,
