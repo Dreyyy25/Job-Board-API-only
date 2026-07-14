@@ -71,3 +71,15 @@ DB_USER: str = os.environ["DB_USER"]
 DB_PASSWORD: str = os.environ["DB_PASSWORD"]
 DB_HOST: str = os.getenv("DB_HOST", "localhost")
 DB_PORT: str = os.getenv("DB_PORT", "5432")
+
+# --- AI (Google Gemini via LangChain) ------------------------------------------
+# Required: the app must crash at import if the key is missing (same fail-fast
+# contract as SECRET_KEY/DB_*). Any placeholder satisfies it for test runs —
+# the offline test suite never sends it anywhere.
+GEMINI_API_KEY: str = os.environ["GEMINI_API_KEY"]
+
+# Model tiers are env-overridable so versions bump without a deploy.
+# Flash default is gemini-2.5-flash (not 3.5-flash, which now prices above
+# 2.5-pro input and would defeat the cheap-tier intent).
+AI_MODEL_PRO: str = os.getenv("AI_MODEL_PRO", "gemini-2.5-pro")
+AI_MODEL_FLASH: str = os.getenv("AI_MODEL_FLASH", "gemini-2.5-flash")
