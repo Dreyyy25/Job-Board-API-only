@@ -89,3 +89,82 @@ class PromptTests(TestCase):
         self.assertIn("Django", human)
         self.assertIn("Acme", human)
         self.assertEqual(messages[0][0], "system")
+
+
+class GenerateJobPostDraftTests(TestCase):
+    def setUp(self):
+        from apps.seekers.models import SkillSet
+        self.company_user = UserAccount.objects.create_user(
+            email="acme@example.com", password="Str0ng-Password!", user_type="company")
+        profile = self.company_user.company_profile
+        profile.company_name = "Acme"
+        profile.save()
+        self.python = SkillSet.objects.create(skill_name="Python")
+        SkillSet.objects.create(skill_name="Django")
+
+    def _draft(self, skills):
+        from apps.ai.schemas import JobPostDraft
+        return JobPostDraft(
+            job_title="Backend Dev", job_description="Build APIs.",
+            suggested_skills=skills,
+        )
+
+    def test_happy_path_maps_names_to_ids_and_drops_inventions(self):
+        from apps.ai.services import generate_job_post_draft
+        from apps.ai.testing import FakeStructuredChatModel
+        fake = FakeStructuredChatModel([self._draft([
+            {"skill_name": "python", "skill_level": "Advanced", "is_required": True},
+            {"skill_name": "Blockchain Ninja", "skill_level": "Expert", "is_required": False},
+        ])])
+        result = generate_job_post_draft(
+            self.company_user, notes="need a dev", model=fake)
+        self.assertEqual(result["job_title"], "Backend Dev")
+        self.assertEqual(len(result["suggested_skills"]), 1)  # invention dropped
+        self.assertEqual(result["suggested_skills"][0]["skill_set_id"], str(self.python.id))
+        self.assertEqual(result["suggested_skills"][0]["skill_name"], "Python")
+
+    def test_writes_usage_log_row(self):
+        from apps.ai.models import AIUsageLog
+        from apps.ai.services import generate_job_post_draft
+        from apps.ai.testing import FakeStructuredChatModel
+        fake = FakeStructuredChatModel([self._draft([])])
+        generate_job_post_draft(self.company_user, notes="n", model=fake)
+        row = AIUsageLog.objects.get()
+        self.assertEqual(row.feature, "job_post_writer")
+        self.assertEqual(row.input_tokens, 100)
+        self.assertEqual(row.output_tokens, 50)
+        self.assertEqual(row.user, self.company_user)
+
+    def test_provider_error_retries_once_then_raises(self):
+        from apps.ai.exceptions import AIProviderError
+        from apps.ai.services import generate_job_post_draft
+        from apps.ai.testing import FakeStructuredChatModel
+        fake = FakeStructuredChatModel([RuntimeError("boom"), RuntimeError("boom")])
+        with self.assertRaises(AIProviderError):
+            generate_job_post_draft(self.company_user, notes="n", model=fake)
+        self.assertEqual(fake.parsed_outputs, [])  # both attempts consumed
+
+    def test_provider_error_then_success_recovers(self):
+        from apps.ai.services import generate_job_post_draft
+        from apps.ai.testing import FakeStructuredChatModel
+        fake = FakeStructuredChatModel([RuntimeError("boom"), self._draft([])])
+        result = generate_job_post_draft(self.company_user, notes="n", model=fake)
+        self.assertEqual(result["job_title"], "Backend Dev")
+
+    def test_quota_error_raises_immediately_without_retry(self):
+        from apps.ai.exceptions import AIQuotaExceededError
+        from apps.ai.services import generate_job_post_draft
+        from apps.ai.testing import FakeStructuredChatModel
+        quota = RuntimeError("429 RESOURCE_EXHAUSTED: quota exceeded")
+        fake = FakeStructuredChatModel([quota, self._draft([])])
+        with self.assertRaises(AIQuotaExceededError):
+            generate_job_post_draft(self.company_user, notes="n", model=fake)
+        self.assertEqual(len(fake.parsed_outputs), 1)  # no second attempt
+
+    def test_unparseable_output_raises_invalid_after_retry(self):
+        from apps.ai.exceptions import AIResponseInvalidError
+        from apps.ai.services import generate_job_post_draft
+        from apps.ai.testing import FakeStructuredChatModel
+        fake = FakeStructuredChatModel([None, None])
+        with self.assertRaises(AIResponseInvalidError):
+            generate_job_post_draft(self.company_user, notes="n", model=fake)
