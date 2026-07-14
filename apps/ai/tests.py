@@ -1,6 +1,15 @@
+from unittest.mock import patch
+
 from django.test import TestCase
+from rest_framework.test import APITestCase
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.accounts.models import UserAccount
+
+
+def _auth(client, user):
+    token = RefreshToken.for_user(user)
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {token.access_token}")
 
 
 class AIUsageLogTests(TestCase):
@@ -168,3 +177,73 @@ class GenerateJobPostDraftTests(TestCase):
         fake = FakeStructuredChatModel([None, None])
         with self.assertRaises(AIResponseInvalidError):
             generate_job_post_draft(self.company_user, notes="n", model=fake)
+
+
+class JobPostAssistEndpointTests(APITestCase):
+    URL = "/api/v1/ai/job-post-assist/"
+
+    def setUp(self):
+        from apps.seekers.models import SkillSet
+        self.company_user = UserAccount.objects.create_user(
+            email="co@example.com", password="Str0ng-Password!", user_type="company")
+        self.seeker = UserAccount.objects.create_user(
+            email="sk@example.com", password="Str0ng-Password!", user_type="job_seeker")
+        self.python = SkillSet.objects.create(skill_name="Python")
+
+    def _fake(self, *items):
+        from apps.ai.testing import FakeStructuredChatModel
+        return FakeStructuredChatModel(list(items))
+
+    def _ok_draft(self):
+        from apps.ai.schemas import JobPostDraft
+        return JobPostDraft(
+            job_title="Backend Dev", job_description="Build APIs.",
+            suggested_skills=[{"skill_name": "Python",
+                               "skill_level": "Advanced", "is_required": True}],
+        )
+
+    def test_anonymous_gets_401(self):
+        r = self.client.post(self.URL, {"notes": "x"})
+        self.assertEqual(r.status_code, 401)
+
+    def test_seeker_gets_403(self):
+        _auth(self.client, self.seeker)
+        r = self.client.post(self.URL, {"notes": "x"})
+        self.assertEqual(r.status_code, 403)
+
+    def test_missing_notes_gets_400(self):
+        _auth(self.client, self.company_user)
+        r = self.client.post(self.URL, {})
+        self.assertEqual(r.status_code, 400)
+
+    def test_company_gets_draft_with_real_skill_ids(self):
+        _auth(self.client, self.company_user)
+        with patch("apps.ai.services.get_model", return_value=self._fake(self._ok_draft())):
+            r = self.client.post(self.URL, {"notes": "need a django dev"})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data["job_title"], "Backend Dev")
+        self.assertEqual(
+            r.data["suggested_skills"][0]["skill_set_id"], str(self.python.id))
+
+    def test_quota_error_maps_to_429(self):
+        _auth(self.client, self.company_user)
+        boom = RuntimeError("429 RESOURCE_EXHAUSTED")
+        with patch("apps.ai.services.get_model", return_value=self._fake(boom)):
+            r = self.client.post(self.URL, {"notes": "x"})
+        self.assertEqual(r.status_code, 429)
+
+    def test_provider_error_maps_to_502(self):
+        _auth(self.client, self.company_user)
+        with patch("apps.ai.services.get_model",
+                   return_value=self._fake(RuntimeError("boom"), RuntimeError("boom"))):
+            r = self.client.post(self.URL, {"notes": "x"})
+        self.assertEqual(r.status_code, 502)
+
+    def test_throttle_classes_are_the_four_layer_stack(self):
+        from apps.ai import views
+        from apps.ai.throttling import AIRateThrottle
+        from jobApp.throttling import BurstRateThrottle
+        from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
+        self.assertEqual(
+            views.job_post_assist.cls.throttle_classes,
+            [AnonRateThrottle, UserRateThrottle, BurstRateThrottle, AIRateThrottle])
