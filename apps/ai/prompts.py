@@ -31,7 +31,7 @@ def build_job_post_writer_prompt(
     human = (
         "\n".join(context_lines)
         + "\n\nSkill taxonomy (choose skill_name values only from this list):\n"
-        + ", ".join(skill_names)
+        + (", ".join(skill_names) or "(none available — suggest no skills)")
         + "\n\nCompany's rough notes:\n"
         + notes
     )

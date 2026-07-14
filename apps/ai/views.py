@@ -10,7 +10,12 @@ from jobApp.throttling import BurstRateThrottle
 
 from . import services
 from .throttling import AIRateThrottle
-from .exceptions import AIProviderError, AIQuotaExceededError, AIResponseInvalidError
+from .exceptions import (
+    AIProviderError,
+    AIQuotaExceededError,
+    AIResponseInvalidError,
+    CompanyProfileMissingError,
+)
 from .permissions import IsCompanyUser
 from .serializers import JobPostAssistRequestSerializer
 
@@ -33,6 +38,7 @@ _JobPostDraftSerializer = inline_serializer(
     fields={
         'job_title': drf_serializers.CharField(),
         'job_description': drf_serializers.CharField(),
+        # inline_serializer returns an instance; recover the class to build the many=True list
         'suggested_skills': type(_SuggestedSkillSerializer)(many=True),
     },
 )
@@ -42,6 +48,9 @@ _JobPostDraftSerializer = inline_serializer(
     request=JobPostAssistRequestSerializer,
     responses={
         200: _JobPostDraftSerializer,
+        400: _AIErrorSerializer,
+        401: _AIErrorSerializer,
+        403: _AIErrorSerializer,
         429: _AIErrorSerializer,
         502: _AIErrorSerializer,
     },
@@ -61,6 +70,10 @@ def job_post_assist(request):
             job_type=serializer.validated_data.get('job_type_id'),
             location_hint=serializer.validated_data.get('location_hint', ''),
         )
+    except CompanyProfileMissingError:
+        return Response(
+            {'error': 'You must complete your company profile before using the AI writer'},
+            status=status.HTTP_400_BAD_REQUEST)
     except AIQuotaExceededError:
         return Response({'error': 'AI provider quota exceeded — try again later'},
                         status=status.HTTP_429_TOO_MANY_REQUESTS)

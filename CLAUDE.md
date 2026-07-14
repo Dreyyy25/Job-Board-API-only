@@ -104,7 +104,7 @@ network. AI views list **four** throttle classes
 `[AnonRateThrottle, UserRateThrottle, BurstRateThrottle, AIRateThrottle]`
 (overriding replaces defaults; `BurstRateThrottle` is shared in
 `jobApp/throttling.py`, `AIRateThrottle` lives in `apps/ai/throttling.py`).
-Every LLM call writes an `AIUsageLog` row. Manual connectivity check:
+Every token-consuming LLM call — including failed-validation retries — writes an `AIUsageLog` row. Manual connectivity check:
 `uv run python manage.py ai_smoke` (billable — not in the test suite).
 
 ### Query hygiene

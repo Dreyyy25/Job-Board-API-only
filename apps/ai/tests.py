@@ -99,6 +99,19 @@ class PromptTests(TestCase):
         self.assertIn("Acme", human)
         self.assertEqual(messages[0][0], "system")
 
+    def test_empty_skill_taxonomy_renders_fallback_text(self):
+        from apps.ai.prompts import build_job_post_writer_prompt
+        messages = build_job_post_writer_prompt(
+            notes="need a dev",
+            company_name="Acme",
+            business_stream="Tech",
+            job_type_name="",
+            location_hint="",
+            skill_names=[],
+        )
+        human = messages[-1][1]
+        self.assertIn("(none available — suggest no skills)", human)
+
 
 class GenerateJobPostDraftTests(TestCase):
     def setUp(self):
@@ -138,20 +151,45 @@ class GenerateJobPostDraftTests(TestCase):
         from apps.ai.testing import FakeStructuredChatModel
         fake = FakeStructuredChatModel([self._draft([])])
         generate_job_post_draft(self.company_user, notes="n", model=fake)
-        row = AIUsageLog.objects.get()
+        row = AIUsageLog.objects.get()  # exactly one row for a first-try success
         self.assertEqual(row.feature, "job_post_writer")
         self.assertEqual(row.input_tokens, 100)
         self.assertEqual(row.output_tokens, 50)
         self.assertEqual(row.user, self.company_user)
 
+    def test_missing_company_profile_raises(self):
+        from apps.ai.exceptions import CompanyProfileMissingError
+        from apps.ai.models import AIUsageLog
+        from apps.ai.services import generate_job_post_draft
+        from apps.ai.testing import FakeStructuredChatModel
+        self.company_user.company_profile.delete()
+        # Reload: the descriptor cache on self.company_user still holds the
+        # now-deleted Company instance from the access above.
+        fresh_user = UserAccount.objects.get(pk=self.company_user.pk)
+        fake = FakeStructuredChatModel([self._draft([])])
+        with self.assertRaises(CompanyProfileMissingError):
+            generate_job_post_draft(fresh_user, notes="n", model=fake)
+        self.assertEqual(AIUsageLog.objects.count(), 0)  # no LLM call was made
+
+    def test_parse_fail_then_success_writes_two_usage_rows(self):
+        from apps.ai.models import AIUsageLog
+        from apps.ai.services import generate_job_post_draft
+        from apps.ai.testing import FakeStructuredChatModel
+        fake = FakeStructuredChatModel([None, self._draft([])])
+        result = generate_job_post_draft(self.company_user, notes="n", model=fake)
+        self.assertEqual(result["job_title"], "Backend Dev")
+        self.assertEqual(AIUsageLog.objects.count(), 2)  # parse failure + success
+
     def test_provider_error_retries_once_then_raises(self):
         from apps.ai.exceptions import AIProviderError
+        from apps.ai.models import AIUsageLog
         from apps.ai.services import generate_job_post_draft
         from apps.ai.testing import FakeStructuredChatModel
         fake = FakeStructuredChatModel([RuntimeError("boom"), RuntimeError("boom")])
         with self.assertRaises(AIProviderError):
             generate_job_post_draft(self.company_user, notes="n", model=fake)
         self.assertEqual(fake.parsed_outputs, [])  # both attempts consumed
+        self.assertEqual(AIUsageLog.objects.count(), 0)  # no result object ever returned
 
     def test_provider_error_then_success_recovers(self):
         from apps.ai.services import generate_job_post_draft
@@ -162,6 +200,7 @@ class GenerateJobPostDraftTests(TestCase):
 
     def test_quota_error_raises_immediately_without_retry(self):
         from apps.ai.exceptions import AIQuotaExceededError
+        from apps.ai.models import AIUsageLog
         from apps.ai.services import generate_job_post_draft
         from apps.ai.testing import FakeStructuredChatModel
         quota = RuntimeError("429 RESOURCE_EXHAUSTED: quota exceeded")
@@ -169,14 +208,41 @@ class GenerateJobPostDraftTests(TestCase):
         with self.assertRaises(AIQuotaExceededError):
             generate_job_post_draft(self.company_user, notes="n", model=fake)
         self.assertEqual(len(fake.parsed_outputs), 1)  # no second attempt
+        self.assertEqual(AIUsageLog.objects.count(), 0)  # no result object ever returned
 
     def test_unparseable_output_raises_invalid_after_retry(self):
         from apps.ai.exceptions import AIResponseInvalidError
+        from apps.ai.models import AIUsageLog
         from apps.ai.services import generate_job_post_draft
         from apps.ai.testing import FakeStructuredChatModel
         fake = FakeStructuredChatModel([None, None])
         with self.assertRaises(AIResponseInvalidError):
             generate_job_post_draft(self.company_user, notes="n", model=fake)
+        self.assertEqual(AIUsageLog.objects.count(), 2)  # both parse-failure attempts logged
+
+
+class EmptySkillTaxonomyTests(TestCase):
+    """No SkillSet rows exist yet — the taxonomy fallback text must not break drafting."""
+
+    def setUp(self):
+        self.company_user = UserAccount.objects.create_user(
+            email="notaxonomy@example.com", password="Str0ng-Password!", user_type="company")
+        profile = self.company_user.company_profile
+        profile.company_name = "Acme"
+        profile.save()
+
+    def test_empty_skill_taxonomy_still_generates_draft(self):
+        from apps.ai.schemas import JobPostDraft
+        from apps.ai.services import generate_job_post_draft
+        from apps.ai.testing import FakeStructuredChatModel
+        draft = JobPostDraft(
+            job_title="Backend Dev", job_description="Build APIs.",
+            suggested_skills=[],
+        )
+        fake = FakeStructuredChatModel([draft])
+        result = generate_job_post_draft(self.company_user, notes="n", model=fake)
+        self.assertEqual(result["job_title"], "Backend Dev")
+        self.assertEqual(result["suggested_skills"], [])
 
 
 class JobPostAssistEndpointTests(APITestCase):
@@ -215,6 +281,18 @@ class JobPostAssistEndpointTests(APITestCase):
         _auth(self.client, self.company_user)
         r = self.client.post(self.URL, {})
         self.assertEqual(r.status_code, 400)
+
+    def test_oversized_notes_gets_400(self):
+        _auth(self.client, self.company_user)
+        r = self.client.post(self.URL, {"notes": "x" * 4001})
+        self.assertEqual(r.status_code, 400)
+
+    def test_missing_company_profile_gets_400(self):
+        _auth(self.client, self.company_user)
+        self.company_user.company_profile.delete()
+        r = self.client.post(self.URL, {"notes": "need a django dev"})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("company profile", r.data["error"])
 
     def test_company_gets_draft_with_real_skill_ids(self):
         _auth(self.client, self.company_user)

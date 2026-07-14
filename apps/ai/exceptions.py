@@ -11,3 +11,7 @@ class AIQuotaExceededError(Exception):
 
 class AIResponseInvalidError(Exception):
     """Model output failed schema validation after one retry → HTTP 502."""
+
+
+class CompanyProfileMissingError(Exception):
+    """Company-type user has no Company row (e.g. deleted after signup) → HTTP 400."""

@@ -2,9 +2,15 @@
 import logging
 import time
 
+from apps.companies.models import Company
 from apps.seekers.models import SkillSet
 
-from .exceptions import AIProviderError, AIQuotaExceededError, AIResponseInvalidError
+from .exceptions import (
+    AIProviderError,
+    AIQuotaExceededError,
+    AIResponseInvalidError,
+    CompanyProfileMissingError,
+)
 from .llm import get_model
 from .models import AIUsageLog
 from .prompts import build_job_post_writer_prompt
@@ -22,17 +28,26 @@ def _classify_provider_error(exc):
     return AIProviderError(text)
 
 
-def _invoke_structured(model, schema, prompt):
+def _invoke_structured(model, schema, prompt, usage_sink):
     """One structured-output call with exactly one retry.
 
     Retries transient provider errors and parse failures; quota errors
     raise immediately (retrying spends more quota for nothing).
-    Returns (parsed instance, usage_metadata dict).
+
+    Every attempt that returns a result object (including parse
+    failures — the raw AIMessage still carries usage_metadata) appends
+    {'usage': <usage_metadata dict>, 'latency_ms': <per-attempt int>} to
+    usage_sink, so billable spend is recorded even when the call never
+    yields a usable draft. Provider exceptions (no result object) append
+    nothing — no tokens were confirmed spent.
+
+    Returns the parsed instance.
     """
     structured = model.with_structured_output(
         schema, method='json_schema', include_raw=True)
     last_error = None
     for attempt in range(2):
+        started = time.monotonic()
         try:
             result = structured.invoke(prompt)
         except Exception as exc:
@@ -42,12 +57,14 @@ def _invoke_structured(model, schema, prompt):
             if isinstance(last_error, AIQuotaExceededError):
                 raise last_error
             continue
+        latency_ms = int((time.monotonic() - started) * 1000)
+        usage = getattr(result.get('raw'), 'usage_metadata', None) or {}
+        usage_sink.append({'usage': usage, 'latency_ms': latency_ms})
         if result.get('parsed') is None:
             last_error = AIResponseInvalidError(str(result.get('parsing_error')))
             logger.warning('ai parse failure attempt=%s', attempt)
             continue
-        usage = getattr(result.get('raw'), 'usage_metadata', None) or {}
-        return result['parsed'], usage
+        return result['parsed']
     raise last_error
 
 
@@ -60,7 +77,10 @@ def generate_job_post_draft(user, *, notes, job_type=None, location_hint='',
     with skills mapped to real SkillSet rows; inventions dropped.
     """
     model = model or get_model('flash')
-    company = user.company_profile
+    try:
+        company = user.company_profile
+    except Company.DoesNotExist:
+        raise CompanyProfileMissingError()
     skills = list(SkillSet.objects.order_by('skill_name'))
     prompt = build_job_post_writer_prompt(
         notes=notes,
@@ -71,9 +91,22 @@ def generate_job_post_draft(user, *, notes, job_type=None, location_hint='',
         skill_names=[s.skill_name for s in skills],
     )
 
-    started = time.monotonic()
-    draft, usage = _invoke_structured(model, JobPostDraft, prompt)
-    latency_ms = int((time.monotonic() - started) * 1000)
+    usage_sink = []
+    try:
+        draft = _invoke_structured(model, JobPostDraft, prompt, usage_sink)
+    finally:
+        # One row per attempt that returned a result object — including
+        # parse failures — so billable spend is never silently dropped.
+        for entry in usage_sink:
+            usage = entry['usage']
+            AIUsageLog.objects.create(
+                feature=AIUsageLog.Feature.JOB_POST_WRITER,
+                user=user,
+                model=str(getattr(model, 'model', '')),
+                input_tokens=usage.get('input_tokens', 0),
+                output_tokens=usage.get('output_tokens', 0),
+                latency_ms=entry['latency_ms'],
+            )
 
     by_name = {s.skill_name.lower(): s for s in skills}
     suggested = []
@@ -88,14 +121,6 @@ def generate_job_post_draft(user, *, notes, job_type=None, location_hint='',
             'is_required': item.is_required,
         })
 
-    AIUsageLog.objects.create(
-        feature=AIUsageLog.Feature.JOB_POST_WRITER,
-        user=user,
-        model=str(getattr(model, 'model', '')),
-        input_tokens=usage.get('input_tokens', 0),
-        output_tokens=usage.get('output_tokens', 0),
-        latency_ms=latency_ms,
-    )
     return {
         'job_title': draft.job_title,
         'job_description': draft.job_description,
