@@ -47,3 +47,45 @@ class ModelFactoryTests(TestCase):
         from apps.ai.llm import get_model
         with self.assertRaises(ValueError):
             get_model('turbo')
+
+
+class SchemaTests(TestCase):
+    def test_job_post_draft_validates(self):
+        from apps.ai.schemas import JobPostDraft
+        draft = JobPostDraft(
+            job_title="Backend Dev",
+            job_description="Build APIs.",
+            suggested_skills=[
+                {"skill_name": "Python", "skill_level": "Advanced", "is_required": True},
+            ],
+        )
+        self.assertEqual(draft.suggested_skills[0].skill_name, "Python")
+
+    def test_bad_skill_level_rejected(self):
+        from pydantic import ValidationError
+        from apps.ai.schemas import JobPostDraft
+        with self.assertRaises(ValidationError):
+            JobPostDraft(
+                job_title="X", job_description="Y",
+                suggested_skills=[
+                    {"skill_name": "Python", "skill_level": "Ninja", "is_required": True},
+                ],
+            )
+
+
+class PromptTests(TestCase):
+    def test_prompt_carries_notes_and_taxonomy(self):
+        from apps.ai.prompts import build_job_post_writer_prompt
+        messages = build_job_post_writer_prompt(
+            notes="need a django dev",
+            company_name="Acme",
+            business_stream="Tech",
+            job_type_name="Full-time",
+            location_hint="Manila",
+            skill_names=["Django", "Python"],
+        )
+        human = messages[-1][1]
+        self.assertIn("need a django dev", human)
+        self.assertIn("Django", human)
+        self.assertIn("Acme", human)
+        self.assertEqual(messages[0][0], "system")
