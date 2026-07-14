@@ -92,6 +92,20 @@ Each app exposes a DRF `DefaultRouter` plus a few function-based endpoints:
 - `/api/v1/companies/` — `business-streams`, `profile` (CompanyViewSet — path is `profile`, not `companies`), `company-images`, plus `dashboard/<uuid:user_id>/`.
 - `/api/v1/seekers/` — `profiles`, `education`, `experience`, `skills`, `seeker-skills`, plus `dashboard/<uuid:user_id>/`.
 - `/api/v1/jobs/` — `job-types`, `job-locations`, `job-posts`, `job-applications`, `job-skills`, plus `apply/`, `applications/job/<uuid>/`, `applications/user/<uuid>/`.
+- `/api/v1/ai/` — `job-post-assist/` (POST, company-only, returns a draft — creates nothing).
+
+### AI features (`apps.ai`)
+
+Leaf app for LLM features (Google Gemini via LangChain). All env access via
+`config.py` (`GEMINI_API_KEY` required; `AI_MODEL_PRO`/`AI_MODEL_FLASH`
+overridable). Services own the LangChain calls and accept the model as an
+injectable — tests use `apps.ai.testing.FakeStructuredChatModel`, never the
+network. AI views list **four** throttle classes
+`[AnonRateThrottle, UserRateThrottle, BurstRateThrottle, AIRateThrottle]`
+(overriding replaces defaults; `BurstRateThrottle` is shared in
+`jobApp/throttling.py`, `AIRateThrottle` lives in `apps/ai/throttling.py`).
+Every LLM call writes an `AIUsageLog` row. Manual connectivity check:
+`uv run python manage.py ai_smoke` (billable — not in the test suite).
 
 ### Query hygiene
 
