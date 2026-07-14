@@ -92,7 +92,7 @@ Each app exposes a DRF `DefaultRouter` plus a few function-based endpoints:
 - `/api/v1/companies/` — `business-streams`, `profile` (CompanyViewSet — path is `profile`, not `companies`), `company-images`, plus `dashboard/<uuid:user_id>/`.
 - `/api/v1/seekers/` — `profiles`, `education`, `experience`, `skills`, `seeker-skills`, plus `dashboard/<uuid:user_id>/`.
 - `/api/v1/jobs/` — `job-types`, `job-locations`, `job-posts`, `job-applications`, `job-skills`, plus `apply/`, `applications/job/<uuid>/`, `applications/user/<uuid>/`.
-- `/api/v1/ai/` — `job-post-assist/` (POST, company-only, returns a draft — creates nothing).
+- `/api/v1/ai/` — `job-post-assist/` (POST, company-only) and `resume-import/` (POST, seeker-only, exactly one of `text`/PDF `file` ≤ 5 MB). Both return drafts — they create nothing.
 
 ### AI features (`apps.ai`)
 
