@@ -1,5 +1,6 @@
 from unittest.mock import patch
 
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -408,3 +409,106 @@ class ResumePromptTests(TestCase):
         self.assertEqual(block["mime_type"], "application/pdf")
         self.assertEqual(block["data"], "QUJD")
         self.assertEqual(human.content[1]["type"], "text")
+
+
+class ExtractResumeTests(TestCase):
+    def setUp(self):
+        from apps.seekers.models import SkillSet
+        self.seeker = UserAccount.objects.create_user(
+            email="seeker@example.com", password="Str0ng-Password!",
+            user_type="job_seeker")
+        self.python = SkillSet.objects.create(skill_name="Python")
+
+    def _extract(self, skills=None, education=None, experience=None):
+        from apps.ai.schemas import ResumeExtract
+        return ResumeExtract(
+            education=education or [], experience=experience or [],
+            skills=skills or [])
+
+    def _pdf(self, content=b"%PDF-1.4 fake resume", name="r.pdf"):
+        return SimpleUploadedFile(name, content, content_type="application/pdf")
+
+    def test_maps_known_skills_and_collects_new_suggestions(self):
+        from apps.ai.services import extract_resume
+        from apps.ai.testing import FakeStructuredChatModel
+        fake = FakeStructuredChatModel([self._extract(skills=[
+            {"skill_name": "python", "skill_level": "Advanced"},
+            {"skill_name": "Kubernetes", "skill_level": "Expert"},
+            {"skill_name": "kubernetes", "skill_level": "Expert"},
+        ])])
+        result = extract_resume(self.seeker, text="resume", model=fake)
+        self.assertEqual(len(result["skills"]), 1)
+        self.assertEqual(result["skills"][0]["skill_set_id"], str(self.python.id))
+        self.assertEqual(result["skills"][0]["skill_name"], "Python")
+        self.assertEqual(result["new_skill_suggestions"], ["Kubernetes"])  # deduped
+
+    def test_education_and_experience_pass_through_model_shaped(self):
+        from apps.ai.services import extract_resume
+        from apps.ai.testing import FakeStructuredChatModel
+        edu = {"institute_university_name": "MIT", "degree_type": "Bachelor",
+               "field_of_study": "CS", "academic_details": "", "percentage": None,
+               "start_date": "2018-01-01", "end_date": None}
+        fake = FakeStructuredChatModel([self._extract(education=[edu])])
+        result = extract_resume(self.seeker, text="resume", model=fake)
+        self.assertEqual(result["education"], [edu])
+        self.assertEqual(result["experience"], [])
+
+    def test_writes_usage_log_with_resume_feature(self):
+        from apps.ai.models import AIUsageLog
+        from apps.ai.services import extract_resume
+        from apps.ai.testing import FakeStructuredChatModel
+        extract_resume(self.seeker, text="resume",
+                       model=FakeStructuredChatModel([self._extract()]))
+        row = AIUsageLog.objects.get()
+        self.assertEqual(row.feature, "resume_import")
+        self.assertEqual(row.user, self.seeker)
+
+    def test_both_text_and_file_rejected(self):
+        from apps.ai.exceptions import InvalidResumeFileError
+        from apps.ai.services import extract_resume
+        from apps.ai.testing import FakeStructuredChatModel
+        with self.assertRaises(InvalidResumeFileError):
+            extract_resume(self.seeker, text="resume", file=self._pdf(),
+                           model=FakeStructuredChatModel([]))
+
+    def test_neither_text_nor_file_rejected(self):
+        from apps.ai.exceptions import InvalidResumeFileError
+        from apps.ai.services import extract_resume
+        from apps.ai.testing import FakeStructuredChatModel
+        with self.assertRaises(InvalidResumeFileError):
+            extract_resume(self.seeker, text="",
+                           model=FakeStructuredChatModel([]))
+
+    def test_oversized_pdf_rejected(self):
+        from apps.ai.exceptions import InvalidResumeFileError
+        from apps.ai.services import extract_resume
+        from apps.ai.testing import FakeStructuredChatModel
+        big = self._pdf(content=b"%PDF-" + b"x" * (5 * 1024 * 1024))
+        with self.assertRaises(InvalidResumeFileError):
+            extract_resume(self.seeker, file=big,
+                           model=FakeStructuredChatModel([]))
+
+    def test_non_pdf_magic_bytes_rejected(self):
+        from apps.ai.exceptions import InvalidResumeFileError
+        from apps.ai.services import extract_resume
+        from apps.ai.testing import FakeStructuredChatModel
+        with self.assertRaises(InvalidResumeFileError):
+            extract_resume(self.seeker, file=self._pdf(content=b"NOTAPDF"),
+                           model=FakeStructuredChatModel([]))
+
+    def test_validation_failures_write_no_usage_rows(self):
+        from apps.ai.exceptions import InvalidResumeFileError
+        from apps.ai.models import AIUsageLog
+        from apps.ai.services import extract_resume
+        from apps.ai.testing import FakeStructuredChatModel
+        with self.assertRaises(InvalidResumeFileError):
+            extract_resume(self.seeker, text="",
+                           model=FakeStructuredChatModel([]))
+        self.assertEqual(AIUsageLog.objects.count(), 0)
+
+    def test_pdf_happy_path(self):
+        from apps.ai.services import extract_resume
+        from apps.ai.testing import FakeStructuredChatModel
+        result = extract_resume(self.seeker, file=self._pdf(),
+                                model=FakeStructuredChatModel([self._extract()]))
+        self.assertEqual(result["skills"], [])

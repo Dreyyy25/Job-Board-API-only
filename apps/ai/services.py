@@ -1,4 +1,5 @@
 """Service layer for AI features. Views translate domain exceptions to HTTP."""
+import base64
 import logging
 import time
 
@@ -10,11 +11,12 @@ from .exceptions import (
     AIQuotaExceededError,
     AIResponseInvalidError,
     CompanyProfileMissingError,
+    InvalidResumeFileError,
 )
 from .llm import get_model
 from .models import AIUsageLog
-from .prompts import build_job_post_writer_prompt
-from .schemas import JobPostDraft
+from .prompts import build_job_post_writer_prompt, build_resume_import_messages
+from .schemas import JobPostDraft, ResumeExtract
 
 logger = logging.getLogger('apps.ai')
 
@@ -68,6 +70,23 @@ def _invoke_structured(model, schema, prompt, usage_sink):
     raise last_error
 
 
+MAX_RESUME_BYTES = 5 * 1024 * 1024
+
+
+def _record_usage(feature, user, model, usage_sink):
+    """One AIUsageLog row per token-consuming attempt (see _invoke_structured)."""
+    for entry in usage_sink:
+        usage = entry['usage']
+        AIUsageLog.objects.create(
+            feature=feature,
+            user=user,
+            model=str(getattr(model, 'model', '')),
+            input_tokens=usage.get('input_tokens', 0),
+            output_tokens=usage.get('output_tokens', 0),
+            latency_ms=entry['latency_ms'],
+        )
+
+
 def generate_job_post_draft(user, *, notes, job_type=None, location_hint='',
                             model=None):
     """Draft a job post from rough notes. Creates nothing but the usage log.
@@ -97,16 +116,7 @@ def generate_job_post_draft(user, *, notes, job_type=None, location_hint='',
     finally:
         # One row per attempt that returned a result object — including
         # parse failures — so billable spend is never silently dropped.
-        for entry in usage_sink:
-            usage = entry['usage']
-            AIUsageLog.objects.create(
-                feature=AIUsageLog.Feature.JOB_POST_WRITER,
-                user=user,
-                model=str(getattr(model, 'model', '')),
-                input_tokens=usage.get('input_tokens', 0),
-                output_tokens=usage.get('output_tokens', 0),
-                latency_ms=entry['latency_ms'],
-            )
+        _record_usage(AIUsageLog.Feature.JOB_POST_WRITER, user, model, usage_sink)
 
     by_name = {s.skill_name.lower(): s for s in skills}
     suggested = []
@@ -125,4 +135,65 @@ def generate_job_post_draft(user, *, notes, job_type=None, location_hint='',
         'job_title': draft.job_title,
         'job_description': draft.job_description,
         'suggested_skills': suggested,
+    }
+
+
+def extract_resume(user, *, text='', file=None, model=None):
+    """Extract structured education/experience/skills from a resume.
+
+    Draft-only: persists nothing but usage logs. Returns
+    {'education': [...], 'experience': [...],
+     'skills': [{'skill_set_id', 'skill_name', 'skill_level'}],
+     'new_skill_suggestions': [str]} — entry keys mirror the
+    EducationData/ExperienceData models; known skills map to real SkillSet
+    rows, unknown ones surface as suggestions instead of being dropped.
+    """
+    text = (text or '').strip()
+    if bool(text) == bool(file):
+        raise InvalidResumeFileError('Provide exactly one of text or file.')
+
+    pdf_b64 = None
+    if file is not None:
+        if file.size > MAX_RESUME_BYTES:
+            raise InvalidResumeFileError('PDF must be 5 MB or smaller.')
+        header = file.read(5)
+        file.seek(0)
+        if header != b'%PDF-':
+            raise InvalidResumeFileError('File is not a readable PDF.')
+        pdf_b64 = base64.b64encode(file.read()).decode('ascii')
+
+    model = model or get_model('flash')
+    prompt = build_resume_import_messages(
+        resume_text=text or None, pdf_b64=pdf_b64)
+
+    usage_sink = []
+    try:
+        extract = _invoke_structured(model, ResumeExtract, prompt, usage_sink)
+    finally:
+        _record_usage(AIUsageLog.Feature.RESUME_IMPORT, user, model, usage_sink)
+
+    by_name = {s.skill_name.lower(): s for s in SkillSet.objects.all()}
+    skills, suggestions, seen = [], [], set()
+    for item in extract.skills:
+        name = item.skill_name.strip()
+        if not name:
+            continue
+        skill = by_name.get(name.lower())
+        if skill is not None:
+            if str(skill.id) in seen:
+                continue
+            seen.add(str(skill.id))
+            skills.append({
+                'skill_set_id': str(skill.id),
+                'skill_name': skill.skill_name,
+                'skill_level': item.skill_level,
+            })
+        elif name.lower() not in {s.lower() for s in suggestions}:
+            suggestions.append(name)
+
+    return {
+        'education': [e.model_dump() for e in extract.education],
+        'experience': [e.model_dump() for e in extract.experience],
+        'skills': skills,
+        'new_skill_suggestions': suggestions,
     }
