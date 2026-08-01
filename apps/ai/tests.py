@@ -1625,3 +1625,81 @@ class ChatExceptionTests(TestCase):
     def test_conversation_exhausted_error_exists(self):
         from apps.ai.exceptions import ConversationExhaustedError
         self.assertTrue(issubclass(ConversationExhaustedError, Exception))
+
+
+class CheckpointerTests(TestCase):
+    def tearDown(self):
+        from apps.ai.checkpointer import reset_checkpointer
+        reset_checkpointer()
+
+    def test_conn_string_built_from_config(self):
+        import config
+        from apps.ai.checkpointer import build_conn_string
+        conn = build_conn_string()
+        self.assertTrue(conn.startswith("postgresql://"))
+        self.assertIn(config.DB_NAME, conn)
+        self.assertIn(config.DB_HOST, conn)
+        self.assertIn(str(config.DB_PORT), conn)
+
+    def test_conn_string_percent_encodes_password(self):
+        """A password with @ or / must not be parsed as URI structure."""
+        from apps.ai.checkpointer import build_conn_string
+        with patch("apps.ai.checkpointer.DB_PASSWORD", "p@ss/w:rd"):
+            conn = build_conn_string()
+        self.assertNotIn("p@ss/w:rd", conn)
+        self.assertIn("p%40ss%2Fw%3Ard", conn)
+
+    def test_conn_string_encodes_space_as_percent20_not_plus(self):
+        """quote_plus would emit '+', which is a literal '+' in URI userinfo —
+        authentication would fail with a baffling error at the first chat turn."""
+        from apps.ai.checkpointer import build_conn_string
+        with patch("apps.ai.checkpointer.DB_PASSWORD", "pass word"):
+            conn = build_conn_string()
+        self.assertIn("pass%20word", conn)
+        self.assertNotIn("pass+word", conn)
+
+    def test_saver_is_built_with_a_strict_msgpack_serializer(self):
+        """The env var is a no-op (langgraph snapshots it at import, long before
+        this module loads), so strictness must be passed explicitly. The default
+        JsonPlusSerializer() is fully permissive: _allowed_msgpack_modules is True."""
+        from apps.ai import checkpointer as cp
+        with patch.object(cp, "ConnectionPool"):
+            saver = cp.get_checkpointer()
+        self.assertIsNone(saver.serde._allowed_msgpack_modules)
+
+    def test_settings_set_the_strict_flag_early_as_defence_in_depth(self):
+        import os
+        self.assertEqual(os.environ.get("LANGGRAPH_STRICT_MSGPACK"), "true")
+
+    def test_get_checkpointer_is_a_singleton(self):
+        from apps.ai import checkpointer as cp
+        with patch.object(cp, "ConnectionPool") as pool:
+            first = cp.get_checkpointer()
+            second = cp.get_checkpointer()
+        self.assertIs(first, second)
+        self.assertEqual(pool.call_count, 1)
+
+    def test_pool_configured_autocommit_dict_row_and_open(self):
+        from apps.ai import checkpointer as cp
+        with patch.object(cp, "ConnectionPool") as pool:
+            cp.get_checkpointer()
+        kwargs = pool.call_args.kwargs
+        self.assertTrue(kwargs["kwargs"]["autocommit"])
+        self.assertIs(kwargs["kwargs"]["row_factory"], cp.dict_row)
+        # Explicit: psycopg_pool's default is deprecated and will flip to False.
+        self.assertTrue(kwargs["open"])
+
+
+class CheckpointerSetupCommandTests(TestCase):
+    def test_command_calls_setup_once(self):
+        from io import StringIO
+        from django.core.management import call_command
+        # Patch where the name is LOOKED UP — the command module binds
+        # get_checkpointer at import, so patching apps.ai.checkpointer would
+        # only work while that module happens to be unimported.
+        target = "apps.ai.management.commands.ai_checkpointer_setup.get_checkpointer"
+        out = StringIO()
+        with patch(target) as fake:
+            call_command("ai_checkpointer_setup", stdout=out)
+        fake.return_value.setup.assert_called_once_with()
+        self.assertIn("checkpointer tables ready", out.getvalue().lower())

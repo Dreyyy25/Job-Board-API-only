@@ -10,6 +10,16 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.1/ref/settings/
 """
 
+# Defence in depth for the LangGraph checkpointer's deserializer. LangGraph
+# snapshots this into a module constant the first time its serde package is
+# imported, and `import langchain.agents` triggers that — so it can only be set
+# by something that runs before any app module. Settings qualify. The
+# authoritative control is the explicit serializer in apps/ai/checkpointer.py,
+# which does not depend on import order at all.
+import os
+
+os.environ.setdefault("LANGGRAPH_STRICT_MSGPACK", "true")
+
 from pathlib import Path
 from datetime import timedelta
 
