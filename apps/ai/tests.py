@@ -1184,3 +1184,173 @@ class ScreenApplicantsServiceTests(_ScreeningFixture, TestCase):
         self.assertNotIn("Prior Corp", joined)
         activity.refresh_from_db()
         self.assertEqual(activity.application_status, 'pending')
+
+
+class ScreenApplicantsEndpointTests(_ScreeningFixture, APITestCase):
+    def _url(self, job_post, query=""):
+        return f"/api/v1/ai/job-posts/{job_post.id}/screen/{query}"
+
+    def _result(self, refs_and_scores):
+        from apps.ai.schemas import CandidateAssessment, ScreeningResult
+        return ScreeningResult(candidates=[
+            CandidateAssessment(candidate_ref=ref, score=score,
+                                strengths=["s"], gaps=["g"], summary="sum")
+            for ref, score in refs_and_scores
+        ])
+
+    def _patch_model(self, *results):
+        from apps.ai.testing import FakeStructuredChatModel
+        return patch("apps.ai.services.get_model",
+                     return_value=FakeStructuredChatModel(parsed_outputs=list(results)))
+
+    def test_owner_gets_ranked_candidates(self):
+        owner = self.make_company_user()
+        job_post = self.make_job_post(owner)
+        self.make_applicant(job_post, "e1@example.com")
+        _auth(self.client, owner)
+        with self._patch_model(self._result([("candidate_1", 82)])):
+            response = self.client.post(self._url(job_post))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['applicant_count'], 1)
+        self.assertEqual(response.data['candidates'][0]['rank'], 1)
+        self.assertFalse(response.data['cached'])
+
+    def test_second_request_is_served_from_cache(self):
+        owner = self.make_company_user()
+        job_post = self.make_job_post(owner)
+        self.make_applicant(job_post, "e2@example.com")
+        _auth(self.client, owner)
+        with self._patch_model(self._result([("candidate_1", 82)])):
+            self.client.post(self._url(job_post))
+        # A fake with no scripted outputs raises inside _invoke_structured, which the
+        # retry wrapper converts to AIProviderError — so this call comes back 502, not
+        # 200, if the cache path is skipped.
+        with self._patch_model():
+            response = self.client.post(self._url(job_post))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.data['cached'])
+
+    def test_refresh_query_param_forces_a_new_run(self):
+        owner = self.make_company_user()
+        job_post = self.make_job_post(owner)
+        self.make_applicant(job_post, "e3@example.com")
+        _auth(self.client, owner)
+        with self._patch_model(self._result([("candidate_1", 20)])):
+            self.client.post(self._url(job_post))
+        with self._patch_model(self._result([("candidate_1", 99)])):
+            response = self.client.post(self._url(job_post, "?refresh=true"))
+        self.assertFalse(response.data['cached'])
+        self.assertEqual(response.data['candidates'][0]['score'], 99)
+
+    def test_no_applicants_returns_409(self):
+        owner = self.make_company_user()
+        job_post = self.make_job_post(owner)
+        _auth(self.client, owner)
+        # A fake with no scripted outputs raises inside _invoke_structured, which the
+        # retry wrapper converts to AIProviderError — so this call comes back 502, not
+        # 409, if the empty-pool check is skipped.
+        with self._patch_model():
+            response = self.client.post(self._url(job_post))
+        self.assertEqual(response.status_code, 409)
+        self.assertIn('error', response.data)
+
+    def test_unknown_job_post_returns_404(self):
+        import uuid as uuid_module
+        owner = self.make_company_user()
+        _auth(self.client, owner)
+        response = self.client.post(
+            f"/api/v1/ai/job-posts/{uuid_module.uuid4()}/screen/")
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.data['error'], 'Job post not found')
+
+    def test_other_company_returns_403(self):
+        owner = self.make_company_user()
+        intruder = self.make_company_user(email="nope@example.com", company_name="Other")
+        job_post = self.make_job_post(owner)
+        self.make_applicant(job_post, "e4@example.com")
+        _auth(self.client, intruder)
+        response = self.client.post(self._url(job_post))
+        self.assertEqual(response.status_code, 403)
+
+    def test_seeker_returns_403(self):
+        owner = self.make_company_user()
+        job_post = self.make_job_post(owner)
+        seeker = UserAccount.objects.create_user(
+            email="seek@example.com", password="Str0ng-Password!", user_type="job_seeker")
+        _auth(self.client, seeker)
+        response = self.client.post(self._url(job_post))
+        self.assertEqual(response.status_code, 403)
+
+    def test_anonymous_returns_401(self):
+        owner = self.make_company_user()
+        job_post = self.make_job_post(owner)
+        response = self.client.post(self._url(job_post))
+        self.assertEqual(response.status_code, 401)
+
+    def test_admin_may_screen_another_companys_post(self):
+        owner = self.make_company_user()
+        admin = UserAccount.objects.create_user(
+            email="root@example.com", password="Str0ng-Password!", user_type="company")
+        admin.is_staff = True
+        admin.save()
+        job_post = self.make_job_post(owner)
+        self.make_applicant(job_post, "e5@example.com")
+        _auth(self.client, admin)
+        with self._patch_model(self._result([("candidate_1", 71)])):
+            response = self.client.post(self._url(job_post))
+        self.assertEqual(response.status_code, 200)
+
+    def test_provider_failure_returns_502(self):
+        owner = self.make_company_user()
+        job_post = self.make_job_post(owner)
+        self.make_applicant(job_post, "e6@example.com")
+        _auth(self.client, owner)
+        with self._patch_model(RuntimeError("down"), RuntimeError("down")):
+            response = self.client.post(self._url(job_post))
+        self.assertEqual(response.status_code, 502)
+
+    def test_quota_failure_returns_429(self):
+        owner = self.make_company_user()
+        job_post = self.make_job_post(owner)
+        self.make_applicant(job_post, "e7@example.com")
+        _auth(self.client, owner)
+        with self._patch_model(RuntimeError("RESOURCE_EXHAUSTED")):
+            response = self.client.post(self._url(job_post))
+        self.assertEqual(response.status_code, 429)
+        self.assertIn('quota', response.data['error'].lower())
+
+    def test_unparseable_output_returns_502_and_bills_both_attempts(self):
+        from apps.ai.models import AIUsageLog
+        owner = self.make_company_user()
+        job_post = self.make_job_post(owner)
+        self.make_applicant(job_post, "parse@example.com")
+        _auth(self.client, owner)
+        with self._patch_model(None, None):
+            response = self.client.post(self._url(job_post))
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(
+            AIUsageLog.objects.filter(feature=AIUsageLog.Feature.SCREENING).count(), 2)
+
+    def test_get_is_not_allowed(self):
+        owner = self.make_company_user()
+        job_post = self.make_job_post(owner)
+        _auth(self.client, owner)
+        self.assertEqual(self.client.get(self._url(job_post)).status_code, 405)
+
+    def test_screening_uses_the_pro_tier(self):
+        owner = self.make_company_user()
+        job_post = self.make_job_post(owner)
+        self.make_applicant(job_post, "tier@example.com")
+        _auth(self.client, owner)
+        with self._patch_model(self._result([("candidate_1", 60)])) as mocked_get_model:
+            self.client.post(self._url(job_post))
+        mocked_get_model.assert_called_once_with('pro')
+
+    def test_throttle_classes_are_the_four_layer_stack(self):
+        from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
+        from apps.ai import views
+        from apps.ai.throttling import AIRateThrottle
+        from jobApp.throttling import BurstRateThrottle
+        self.assertEqual(
+            views.screen_applicants.cls.throttle_classes,
+            [AnonRateThrottle, UserRateThrottle, BurstRateThrottle, AIRateThrottle])
