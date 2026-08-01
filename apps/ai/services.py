@@ -4,6 +4,7 @@ import logging
 import time
 
 from apps.companies.models import Company
+from apps.jobs.models import JobPostActivity
 from apps.seekers.models import SkillSet
 
 from .exceptions import (
@@ -71,6 +72,83 @@ def _invoke_structured(model, schema, prompt, usage_sink):
 
 
 MAX_RESUME_BYTES = 5 * 1024 * 1024
+MAX_SCREENED_APPLICANTS = 50
+_COVER_LETTER_CHARS = 500
+_EXPERIENCE_DESC_CHARS = 300
+
+
+def _fetch_applications(job_post):
+    """Newest-first applications, capped, with every dossier relation preloaded.
+
+    with_related() covers user_account/job_post/company only — the seeker
+    relations must be prefetched explicitly or dossier assembly becomes an N+1.
+    """
+    return list(
+        JobPostActivity.objects
+        .filter(job_post=job_post)
+        .with_related()
+        .prefetch_related(
+            'user_account__seeker_profile',
+            'user_account__education',
+            'user_account__experiences',
+            'user_account__skills__skill_set',
+        )
+        .order_by('-application_date')[:MAX_SCREENED_APPLICANTS]
+    )
+
+
+def _seeker_name(user_account):
+    """Full name, or '' when the seeker profile is missing.
+
+    Django's reverse-one-to-one DoesNotExist subclasses AttributeError, so
+    getattr's default fires instead of raising.
+    """
+    profile = getattr(user_account, 'seeker_profile', None)
+    if profile is None:
+        return ''
+    return f"{profile.first_name} {profile.last_name}".strip()
+
+
+def _date_span(start, end):
+    if not start and not end:
+        return ''
+    return f"{start.isoformat() if start else '?'} to {end.isoformat() if end else 'present'}"
+
+
+def _build_dossier(label, activity):
+    """Compact plain-text dossier for one applicant.
+
+    Never includes the applicant's email — name only, per the privacy rule.
+    All related sets are read with .all() so the prefetch cache is used.
+    """
+    user = activity.user_account
+    lines = [f"{label}:", f"Name: {_seeker_name(user) or 'Not provided'}"]
+
+    skills = [f"{s.skill_set.skill_name} ({s.skill_level})" for s in user.skills.all()]
+    lines.append("Skills: " + (", ".join(skills) or "none listed"))
+
+    for edu in user.education.all():
+        span = _date_span(edu.start_date, edu.end_date)
+        lines.append(
+            f"Education: {edu.degree_type or 'Unspecified'} in "
+            f"{edu.field_of_study or 'unspecified field'} at "
+            f"{edu.institute_university_name or 'unnamed institution'}"
+            + (f" ({span})" if span else "")
+        )
+
+    for exp in user.experiences.all():
+        span = _date_span(exp.start_date, exp.end_date)
+        description = exp.description[:_EXPERIENCE_DESC_CHARS]
+        lines.append(
+            f"Experience: {exp.position} at {exp.company_name}"
+            + (f" ({span})" if span else "")
+            + (f" - {description}" if description else "")
+        )
+
+    if activity.cover_letter:
+        lines.append("Cover letter: " + activity.cover_letter[:_COVER_LETTER_CHARS])
+
+    return "\n".join(lines)
 
 
 def _record_usage(feature, user, model, usage_sink):

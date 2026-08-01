@@ -773,3 +773,140 @@ class ScreeningPromptTests(TestCase):
     def test_system_prompt_warns_about_untrusted_dossiers(self):
         from apps.ai.prompts import SCREENING_SYSTEM
         self.assertIn("untrusted", SCREENING_SYSTEM.lower())
+
+
+class _ScreeningFixture:
+    """Company + job post + applicant factory shared by the screening tests.
+
+    Registration signals auto-create Company / SeekerProfile rows, so those are
+    fetched, not created.
+    """
+
+    def make_company_user(self, email="owner@example.com", company_name="Acme"):
+        user = UserAccount.objects.create_user(
+            email=email, password="Str0ng-Password!", user_type="company")
+        company = user.company_profile
+        company.company_name = company_name
+        company.save()
+        return user
+
+    def make_job_post(self, company_user, title="Backend Engineer"):
+        from apps.jobs.models import JobLocation, JobPost, JobType
+        job_type, _ = JobType.objects.get_or_create(job_type_name="Full-time")
+        location, _ = JobLocation.objects.get_or_create(city="Cebu", country="PH")
+        return JobPost.objects.create(
+            company=company_user.company_profile,
+            job_type=job_type,
+            job_location=location,
+            job_title=title,
+            job_description="Design, build and operate our REST APIs.",
+        )
+
+    def make_applicant(self, job_post, email, first="Jane", last="Doe",
+                       skill_name="Python", cover_letter="", application_date=None):
+        from apps.jobs.models import JobPostActivity
+        from apps.seekers.models import EducationData, ExperienceData, SeekerSkillSet, SkillSet
+        user = UserAccount.objects.create_user(
+            email=email, password="Str0ng-Password!", user_type="job_seeker")
+        profile = user.seeker_profile
+        profile.first_name, profile.last_name = first, last
+        profile.save()
+        skill, _ = SkillSet.objects.get_or_create(skill_name=skill_name)
+        SeekerSkillSet.objects.create(
+            user_account=user, skill_set=skill, skill_level="Advanced")
+        EducationData.objects.create(
+            user_account=user, institute_university_name="State University",
+            degree_type="Bachelor", field_of_study="Computer Science",
+            start_date="2016-01-01", end_date="2020-01-01")
+        ExperienceData.objects.create(
+            user_account=user, company_name="Prior Corp", position="Engineer",
+            description="Maintained internal services.",
+            start_date="2020-02-01", end_date="2024-01-01")
+        kwargs = {"user_account": user, "job_post": job_post,
+                  "cover_letter": cover_letter}
+        if application_date is not None:
+            kwargs["application_date"] = application_date
+        return JobPostActivity.objects.create(**kwargs)
+
+
+class DossierAssemblyTests(_ScreeningFixture, TestCase):
+    def test_dossier_contains_name_skills_education_experience(self):
+        from apps.ai.services import _build_dossier, _fetch_applications
+        owner = self.make_company_user()
+        job_post = self.make_job_post(owner)
+        self.make_applicant(job_post, "a1@example.com", first="Ada", last="Lovelace")
+        activity = _fetch_applications(job_post)[0]
+        text = _build_dossier("candidate_1", activity)
+        self.assertIn("candidate_1", text)
+        self.assertIn("Ada Lovelace", text)
+        self.assertIn("Python (Advanced)", text)
+        self.assertIn("State University", text)
+        self.assertIn("Prior Corp", text)
+
+    def test_dossier_never_contains_the_applicant_email(self):
+        from apps.ai.services import _build_dossier, _fetch_applications
+        owner = self.make_company_user()
+        job_post = self.make_job_post(owner)
+        self.make_applicant(job_post, "private@example.com")
+        text = _build_dossier("candidate_1", _fetch_applications(job_post)[0])
+        self.assertNotIn("private@example.com", text)
+
+    def test_cover_letter_is_truncated(self):
+        from apps.ai.services import _build_dossier, _fetch_applications
+        owner = self.make_company_user()
+        job_post = self.make_job_post(owner)
+        self.make_applicant(job_post, "a2@example.com", cover_letter="x" * 2000)
+        text = _build_dossier("candidate_1", _fetch_applications(job_post)[0])
+        self.assertIn("Cover letter:", text)
+        self.assertLess(text.count("x"), 600)
+
+    def test_missing_seeker_profile_does_not_raise(self):
+        from apps.ai.services import _build_dossier, _fetch_applications
+        owner = self.make_company_user()
+        job_post = self.make_job_post(owner)
+        activity = self.make_applicant(job_post, "a3@example.com")
+        activity.user_account.seeker_profile.delete()
+        text = _build_dossier("candidate_1", _fetch_applications(job_post)[0])
+        self.assertIn("Not provided", text)
+
+    def test_fetch_is_newest_first_and_capped(self):
+        from django.utils import timezone
+        from datetime import timedelta
+        from apps.ai.services import MAX_SCREENED_APPLICANTS, _fetch_applications
+        owner = self.make_company_user()
+        job_post = self.make_job_post(owner)
+        base = timezone.now()
+        for i in range(MAX_SCREENED_APPLICANTS + 3):
+            self.make_applicant(job_post, f"bulk{i}@example.com",
+                                application_date=base + timedelta(minutes=i))
+        applications = _fetch_applications(job_post)
+        self.assertEqual(len(applications), MAX_SCREENED_APPLICANTS)
+        dates = [a.application_date for a in applications]
+        self.assertEqual(dates, sorted(dates, reverse=True))
+
+    def test_dossier_assembly_query_count_is_flat(self):
+        from django.test.utils import CaptureQueriesContext
+        from django.db import connection
+        from apps.ai.services import _build_dossier, _fetch_applications
+
+        def assemble(job_post):
+            with CaptureQueriesContext(connection) as ctx:
+                applications = _fetch_applications(job_post)
+                for i, activity in enumerate(applications, start=1):
+                    _build_dossier(f"candidate_{i}", activity)
+            return len(ctx)
+
+        owner = self.make_company_user()
+        small = self.make_job_post(owner, title="Small")
+        for i in range(3):
+            self.make_applicant(small, f"small{i}@example.com")
+        large = self.make_job_post(owner, title="Large")
+        for i in range(12):
+            self.make_applicant(large, f"large{i}@example.com")
+
+        small_queries = assemble(small)
+        large_queries = assemble(large)
+        self.assertLessEqual(small_queries, 10)
+        self.assertLessEqual(large_queries, 10)
+        # The real N+1 guard: cost must not grow with the number of applicants.
+        self.assertEqual(small_queries, large_queries)
