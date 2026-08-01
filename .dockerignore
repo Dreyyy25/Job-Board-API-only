@@ -1,0 +1,32 @@
+# Secrets — never bake credentials into the image.
+.env
+.env.*
+
+# Local environments and caches
+.venv/
+env/
+venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+
+# VCS / tooling
+.git/
+.gitignore
+.claude/
+.idea/
+.vscode/
+
+# Build artifacts regenerated inside the image
+staticfiles/
+
+# Local data and logs
+media/
+db.sqlite3
+*.log
+
+# Not needed at runtime
+docs/
+Job Board API.postman_collection.json
+API_DOCUMENTATION.md
+Readme.md
