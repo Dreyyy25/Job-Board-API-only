@@ -713,3 +713,63 @@ class IsCompanyUserOrAdminTests(TestCase):
     def test_anonymous_denied(self):
         from django.contrib.auth.models import AnonymousUser
         self.assertFalse(self._check(AnonymousUser()))
+
+
+class ScreeningSchemaTests(TestCase):
+    def test_candidate_assessment_round_trips(self):
+        from apps.ai.schemas import CandidateAssessment
+        item = CandidateAssessment(
+            candidate_ref="candidate_2", score=88,
+            strengths=["5 years Django"], gaps=["No Kubernetes"],
+            summary="Strong backend fit.")
+        self.assertEqual(item.candidate_ref, "candidate_2")
+        self.assertEqual(item.score, 88)
+
+    def test_screening_result_holds_candidates(self):
+        from apps.ai.schemas import CandidateAssessment, ScreeningResult
+        result = ScreeningResult(candidates=[
+            CandidateAssessment(candidate_ref="candidate_1", score=50,
+                                strengths=[], gaps=[], summary="ok"),
+        ])
+        self.assertEqual(len(result.candidates), 1)
+
+    def test_candidate_requires_every_field(self):
+        from pydantic import ValidationError
+        from apps.ai.schemas import CandidateAssessment
+        with self.assertRaises(ValidationError):
+            CandidateAssessment(candidate_ref="candidate_1", score=50)
+
+
+class ScreeningPromptTests(TestCase):
+    def _build(self, **overrides):
+        from apps.ai.prompts import build_screening_prompt
+        kwargs = dict(
+            job_title="Backend Engineer",
+            job_description="Build and run our APIs.",
+            required_skills=["Python (Advanced, required)"],
+            dossiers=["candidate_1:\nName: Jane Doe\nSkills: Python (Advanced)"],
+        )
+        kwargs.update(overrides)
+        return build_screening_prompt(**kwargs)
+
+    def test_first_message_is_the_system_prompt(self):
+        from apps.ai.prompts import SCREENING_SYSTEM
+        messages = self._build()
+        self.assertEqual(messages[0], ("system", SCREENING_SYSTEM))
+
+    def test_human_message_carries_job_and_dossiers(self):
+        messages = self._build()
+        human = messages[1][1]
+        self.assertIn("Backend Engineer", human)
+        self.assertIn("Build and run our APIs.", human)
+        self.assertIn("Python (Advanced, required)", human)
+        self.assertIn("candidate_1", human)
+        self.assertIn("Jane Doe", human)
+
+    def test_empty_required_skills_renders_placeholder(self):
+        human = self._build(required_skills=[])[1][1]
+        self.assertIn("(none listed)", human)
+
+    def test_system_prompt_warns_about_untrusted_dossiers(self):
+        from apps.ai.prompts import SCREENING_SYSTEM
+        self.assertIn("untrusted", SCREENING_SYSTEM.lower())

@@ -73,3 +73,25 @@ class ResumeExtract(BaseModel):
     education: list[EducationEntry] = Field(description="All education records found.")
     experience: list[ExperienceEntry] = Field(description="All work experience found.")
     skills: list[ResumeSkill] = Field(description="All identifiable skills.")
+
+
+# Screening: the model never sees a UUID. Dossiers are labelled candidate_1..N
+# and the model echoes the label back; the service maps labels to real rows and
+# drops any label it did not issue.
+
+
+class CandidateAssessment(BaseModel):
+    candidate_ref: str = Field(
+        description="The candidate label exactly as given in the prompt, e.g. candidate_3.")
+    score: int = Field(
+        description="Fit score for THIS job, 0-100. 80+ strong, 50-79 partial, below 50 weak.")
+    strengths: list[str] = Field(
+        description="2-4 short concrete strengths, each grounded in the dossier text.")
+    gaps: list[str] = Field(
+        description="1-4 short concrete gaps against the job's requirements.")
+    summary: str = Field(description="Two-sentence hiring summary for this candidate.")
+
+
+class ScreeningResult(BaseModel):
+    candidates: list[CandidateAssessment] = Field(
+        description="Exactly one entry per candidate label supplied in the prompt.")
