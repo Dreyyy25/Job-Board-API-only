@@ -64,6 +64,8 @@ Throttling is **layered**: `DEFAULT_THROTTLE_CLASSES = [AnonRateThrottle, UserRa
 
 Cookie defaults: `SESSION_COOKIE_SAMESITE='Lax'`, `CSRF_COOKIE_SAMESITE='Lax'`, `SESSION_COOKIE_HTTPONLY=True`. These harden the admin surface — the API itself uses JWTs in the Authorization header, so an SPA with cookie-based auth would need different values.
 
+`login` and `register` are **JSON-only** (`@parser_classes([JSONParser])` in `apps/accounts/views.py`) — a login-CSRF mitigation now that auth state lives in a cookie. Both are `AllowAny` `@api_view` FBVs, which DRF wraps in `csrf_exempt`, and both set the httpOnly refresh cookie; if they parsed form/multipart bodies a cross-site HTML `<form method="POST">` could plant an attacker's refresh token in a victim's browser (session fixation — `SameSite=Lax` governs when a cookie is *sent*, not whether a `Set-Cookie` is *accepted*). HTML forms cannot send `application/json`, and a cross-site `fetch` that does triggers a CORS preflight that fails. Do **not** generalize this to `DEFAULT_PARSER_CLASSES` — the AI resume-import endpoint needs multipart.
+
 Failed-login attempts log a `WARNING` to `django.security` keyed by a 16-char SHA-256 prefix of the attempted email — preserves forensic correlation while keeping plaintext emails out of logs (GDPR-friendly default). Production LOGGING adds `django.security` and `django.request` loggers on top of the general `django`/`apps` set.
 
 `DJANGO_SETTINGS_MODULE=jobApp.settings.production manage.py check --deploy` returns zero warnings when the required env is set — see `.env.example` "Minimum production env" section.

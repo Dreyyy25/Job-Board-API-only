@@ -1,3 +1,5 @@
+from urllib.parse import urlencode
+
 from rest_framework.test import APITestCase
 from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -196,6 +198,31 @@ class CookieAuthTests(APITestCase):
         self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
         self.assertIn("detail", r.data)
 
+    def test_refresh_with_deleted_user_returns_401_not_500(self):
+        """A signature-valid token whose user row is gone must 401.
+
+        simplejwt's TokenRefreshSerializer.validate does an unguarded
+        `get_user_model().objects.get(...)`, which raises
+        UserAccount.DoesNotExist (not a TokenError) — DRF's default
+        handler would turn that into a 500. Users can DELETE their own
+        account, and the 7-day cookie keeps auto-attaching the stale
+        token afterwards, so the SPA hits this on every bootstrap.
+        """
+        name = django_settings.AUTH_REFRESH_COOKIE["NAME"]
+        user = UserAccount.objects.create_user(
+            email="deleted-user@example.com",
+            password="Str0ng-Password!",
+            user_type="job_seeker",
+        )
+        refresh = RefreshToken.for_user(user)
+        self.client.cookies[name] = str(refresh)
+        user.delete()
+
+        r = self.client.post("/api/v1/accounts/token/refresh/", {}, format="json")
+
+        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertIn("detail", r.data)
+
     def test_logout_with_cookie_blacklists_and_clears_cookie(self):
         name = django_settings.AUTH_REFRESH_COOKIE["NAME"]
         user = UserAccount.objects.create_user(
@@ -237,6 +264,80 @@ class CookieAuthTests(APITestCase):
         name = django_settings.AUTH_REFRESH_COOKIE["NAME"]
         self.assertIn(name, r.cookies)
         self.assertEqual(r.cookies[name].value, "")
+
+
+class JsonOnlyAuthEndpointTests(APITestCase):
+    """login/register accept JSON only — login-CSRF mitigation.
+
+    Both are AllowAny `@api_view` FBVs, which DRF wraps in `csrf_exempt`,
+    and both now SET an httpOnly refresh cookie. If they parsed
+    form-encoded bodies, a cross-site HTML `<form method="POST">` could
+    plant an attacker's refresh token in the victim's browser (session
+    fixation). HTML forms cannot send `application/json`, and a
+    cross-site `fetch` with that content type triggers a CORS preflight
+    that fails, so rejecting non-JSON bodies closes the hole.
+    """
+
+    def setUp(self):
+        cache.clear()
+        self.cookie_name = django_settings.AUTH_REFRESH_COOKIE["NAME"]
+
+    def _post_form(self, url, payload):
+        return self.client.post(
+            url,
+            urlencode(payload),
+            content_type="application/x-www-form-urlencoded",
+        )
+
+    def test_login_rejects_form_encoded_body(self):
+        UserAccount.objects.create_user(
+            email="form-login@example.com",
+            password="Str0ng-Password!",
+            user_type="job_seeker",
+        )
+        r = self._post_form("/api/v1/accounts/login/", {
+            "email": "form-login@example.com",
+            "password": "Str0ng-Password!",
+        })
+        self.assertEqual(r.status_code, status.HTTP_415_UNSUPPORTED_MEDIA_TYPE)
+        self.assertNotIn(self.cookie_name, r.cookies)
+
+    def test_register_rejects_form_encoded_body(self):
+        r = self._post_form("/api/v1/accounts/register/", {
+            "email": "form-register@example.com",
+            "password": "Str0ng-Password!",
+            "user_type": "job_seeker",
+        })
+        self.assertEqual(r.status_code, status.HTTP_415_UNSUPPORTED_MEDIA_TYPE)
+        self.assertNotIn(self.cookie_name, r.cookies)
+        self.assertFalse(
+            UserAccount.objects.filter(email="form-register@example.com").exists()
+        )
+
+    def test_login_rejects_multipart_body(self):
+        UserAccount.objects.create_user(
+            email="mp-login@example.com",
+            password="Str0ng-Password!",
+            user_type="job_seeker",
+        )
+        r = self.client.post("/api/v1/accounts/login/", {
+            "email": "mp-login@example.com",
+            "password": "Str0ng-Password!",
+        }, format="multipart")
+        self.assertEqual(r.status_code, status.HTTP_415_UNSUPPORTED_MEDIA_TYPE)
+        self.assertNotIn(self.cookie_name, r.cookies)
+
+    def test_register_rejects_multipart_body(self):
+        r = self.client.post("/api/v1/accounts/register/", {
+            "email": "mp-register@example.com",
+            "password": "Str0ng-Password!",
+            "user_type": "job_seeker",
+        }, format="multipart")
+        self.assertEqual(r.status_code, status.HTTP_415_UNSUPPORTED_MEDIA_TYPE)
+        self.assertNotIn(self.cookie_name, r.cookies)
+        self.assertFalse(
+            UserAccount.objects.filter(email="mp-register@example.com").exists()
+        )
 
 
 from django.core.cache import cache

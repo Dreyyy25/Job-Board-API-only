@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.exceptions import ObjectDoesNotExist
 from django.urls import path, include
 from drf_spectacular.utils import OpenApiResponse, extend_schema, inline_serializer
 from rest_framework import serializers as drf_serializers
@@ -59,6 +60,12 @@ class CookieTokenRefreshView(TokenRefreshView):
             serializer.is_valid(raise_exception=True)
         except TokenError as e:
             raise InvalidToken(e.args[0]) from e
+        except ObjectDoesNotExist as e:
+            # simplejwt's TokenRefreshSerializer.validate looks the user up
+            # with an unguarded .get(), so a signature-valid token whose user
+            # row was deleted raises DoesNotExist — not TokenError — and DRF
+            # would render it as a 500. A vanished user is an invalid token.
+            raise InvalidToken() from e
 
         data = dict(serializer.validated_data)
         rotated_refresh = data.pop('refresh', None)

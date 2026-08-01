@@ -8,8 +8,14 @@ from drf_spectacular.utils import (
 )
 from rest_framework import serializers as drf_serializers
 from rest_framework import viewsets, status
-from rest_framework.decorators import api_view, permission_classes, throttle_classes
+from rest_framework.decorators import (
+    api_view,
+    parser_classes,
+    permission_classes,
+    throttle_classes,
+)
 from rest_framework.throttling import AnonRateThrottle
+from rest_framework.parsers import JSONParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 
@@ -140,8 +146,17 @@ def _serialize_profile(user):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 @throttle_classes([RegisterThrottle])
+@parser_classes([JSONParser])
 def register(request):
-    """Register a new user account."""
+    """Register a new user account (JSON bodies only).
+
+    JSON-only is a login-CSRF mitigation: this view is AllowAny, DRF wraps
+    `@api_view` in `csrf_exempt`, and it sets an httpOnly refresh cookie.
+    Accepting form/multipart bodies would let a cross-site HTML form plant
+    an attacker's refresh token in the victim's browser. HTML forms cannot
+    send `application/json`, and a cross-site fetch that does triggers a
+    CORS preflight that fails.
+    """
     serializer = RegisterSerializer(data=request.data)
     if not serializer.is_valid():
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -188,8 +203,13 @@ def register(request):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 @throttle_classes([LoginThrottle])
+@parser_classes([JSONParser])
 def login(request):
-    """Login for UserAccount model."""
+    """Login for UserAccount model (JSON bodies only).
+
+    See `register` — JSON-only closes the login-CSRF / refresh-cookie
+    fixation hole on this AllowAny, csrf-exempt, cookie-setting view.
+    """
     email = request.data.get('email')
     password = request.data.get('password')
 
