@@ -95,7 +95,7 @@ Each app exposes a DRF `DefaultRouter` plus a few function-based endpoints:
 - `/api/v1/companies/` — `business-streams`, `profile` (CompanyViewSet — path is `profile`, not `companies`), `company-images`, plus `dashboard/<uuid:user_id>/`.
 - `/api/v1/seekers/` — `profiles`, `education`, `experience`, `skills`, `seeker-skills`, plus `dashboard/<uuid:user_id>/`.
 - `/api/v1/jobs/` — `job-types`, `job-locations`, `job-posts`, `job-applications`, `job-skills`, plus `apply/`, `applications/job/<uuid>/`, `applications/user/<uuid>/`.
-- `/api/v1/ai/` — `job-post-assist/` (POST, company-only) and `resume-import/` (POST, seeker-only, exactly one of `text`/PDF `file` ≤ 5 MB). Both return drafts — they create nothing.
+- `/api/v1/ai/` — `job-post-assist/` (POST, company-only) and `resume-import/` (POST, seeker-only, exactly one of `text`/PDF `file` ≤ 5 MB) return drafts and create nothing; `job-posts/<uuid:job_post_id>/screen/` (POST, company-owner-or-admin, `?refresh=true` to bypass the cache) scores and ranks that post's applicants and caches the run as a `ScreeningReport`.
 
 ### AI features (`apps.ai`)
 
@@ -109,6 +109,14 @@ network. AI views list **four** throttle classes
 `jobApp/throttling.py`, `AIRateThrottle` lives in `apps/ai/throttling.py`).
 Every token-consuming LLM call — including failed-validation retries — writes an `AIUsageLog` row. Manual connectivity check:
 `uv run python manage.py ai_smoke` (billable — not in the test suite).
+Screening uses the **Pro** tier (writer and resume import use Flash), sends at
+most 50 applicants (newest first — beyond that the response carries
+`truncated` plus `excluded_count`), and labels candidates `candidate_1..N` so
+the model never handles a UUID; labels it did not issue are dropped. A stored
+`ScreeningReport` is replayed without an LLM call until `?refresh=true` is
+passed or a `JobPostActivity` newer than `report.created_at` exists — a
+timestamp rule, deliberately not a count, so withdraw-plus-reapply still
+invalidates.
 
 ### Query hygiene
 
