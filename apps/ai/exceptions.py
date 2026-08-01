@@ -20,3 +20,15 @@ class CompanyProfileMissingError(Exception):
 class InvalidResumeFileError(Exception):
     """Resume upload rejected: wrong type, over size cap, unreadable, or
     not exactly one of text/file → HTTP 400."""
+
+
+class NoApplicantsError(Exception):
+    """Screening requested for a post with zero applicants → HTTP 409."""
+
+
+class JobPostNotFoundError(Exception):
+    """Screening requested for a job post id that does not exist → HTTP 404."""
+
+
+class ScreeningPermissionError(Exception):
+    """Requester neither owns the job post nor is an admin → HTTP 403."""

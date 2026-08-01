@@ -631,3 +631,85 @@ class ResumeImportEndpointTests(APITestCase):
         self.assertEqual(
             views.resume_import.cls.throttle_classes,
             [AnonRateThrottle, UserRateThrottle, BurstRateThrottle, AIRateThrottle])
+
+
+class ScreeningReportModelTests(TestCase):
+    def _job_post(self):
+        from apps.jobs.models import JobLocation, JobPost, JobType
+        company_user = UserAccount.objects.create_user(
+            email="screenco@example.com", password="Str0ng-Password!", user_type="company")
+        company = company_user.company_profile
+        company.company_name = "Acme"
+        company.save()
+        return JobPost.objects.create(
+            company=company,
+            job_type=JobType.objects.create(job_type_name="Full-time"),
+            job_location=JobLocation.objects.create(city="Cebu", country="PH"),
+            job_title="Backend Engineer",
+            job_description="Build APIs.",
+        )
+
+    def test_stores_report_payload_and_count(self):
+        from apps.ai.models import ScreeningReport
+        job_post = self._job_post()
+        report = ScreeningReport.objects.create(
+            job_post=job_post,
+            report={"candidates": [], "truncated": False, "excluded_count": 0},
+            applicant_count=3,
+        )
+        report.refresh_from_db()
+        self.assertEqual(report.report["truncated"], False)
+        self.assertEqual(report.applicant_count, 3)
+        self.assertIsNotNone(report.id)
+
+    def test_newest_first_ordering(self):
+        from apps.ai.models import ScreeningReport
+        job_post = self._job_post()
+        older = ScreeningReport.objects.create(
+            job_post=job_post, report={}, applicant_count=1)
+        newer = ScreeningReport.objects.create(
+            job_post=job_post, report={}, applicant_count=2)
+        self.assertEqual(
+            list(ScreeningReport.objects.filter(job_post=job_post)), [newer, older])
+
+    def test_deleting_job_post_deletes_reports(self):
+        from apps.ai.models import ScreeningReport
+        job_post = self._job_post()
+        ScreeningReport.objects.create(job_post=job_post, report={}, applicant_count=1)
+        job_post.delete()
+        self.assertEqual(ScreeningReport.objects.count(), 0)
+
+
+class IsCompanyUserOrAdminTests(TestCase):
+    def _check(self, user):
+        from apps.ai.permissions import IsCompanyUserOrAdmin
+        request = type("R", (), {"user": user})()
+        return IsCompanyUserOrAdmin().has_permission(request, None)
+
+    def test_company_user_allowed(self):
+        user = UserAccount.objects.create_user(
+            email="c1@example.com", password="Str0ng-Password!", user_type="company")
+        self.assertTrue(self._check(user))
+
+    def test_seeker_user_denied(self):
+        user = UserAccount.objects.create_user(
+            email="s1@example.com", password="Str0ng-Password!", user_type="job_seeker")
+        self.assertFalse(self._check(user))
+
+    def test_staff_seeker_allowed(self):
+        user = UserAccount.objects.create_user(
+            email="s2@example.com", password="Str0ng-Password!", user_type="job_seeker")
+        user.is_staff = True
+        user.save()
+        self.assertTrue(self._check(user))
+
+    def test_superuser_seeker_allowed(self):
+        user = UserAccount.objects.create_user(
+            email="s3@example.com", password="Str0ng-Password!", user_type="job_seeker")
+        user.is_superuser = True
+        user.save()
+        self.assertTrue(self._check(user))
+
+    def test_anonymous_denied(self):
+        from django.contrib.auth.models import AnonymousUser
+        self.assertFalse(self._check(AnonymousUser()))
