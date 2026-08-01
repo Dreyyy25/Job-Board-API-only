@@ -1,11 +1,14 @@
+from typing import Any
 from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
+from langchain_core.runnables import RunnableLambda
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.accounts.models import UserAccount
+from apps.ai.testing import FakeStructuredChatModel
 
 
 def _auth(client, user):
@@ -884,6 +887,42 @@ class DossierAssemblyTests(_ScreeningFixture, TestCase):
         dates = [a.application_date for a in applications]
         self.assertEqual(dates, sorted(dates, reverse=True))
 
+    def test_dossier_caps_rows_per_section(self):
+        # Seekers create education/experience/skill rows through unrestricted
+        # viewsets, so an applicant could otherwise pad one dossier to megabytes
+        # of prompt text billed to the company.
+        from apps.seekers.models import EducationData, ExperienceData, SeekerSkillSet, SkillSet
+        from apps.ai.services import (
+            MAX_DOSSIER_EDUCATION, MAX_DOSSIER_EXPERIENCE, MAX_DOSSIER_SKILLS,
+            _build_dossier, _fetch_applications,
+        )
+        owner = self.make_company_user()
+        job_post = self.make_job_post(owner)
+        user = self.make_applicant(job_post, "flood@example.com").user_account
+        for i in range(MAX_DOSSIER_EXPERIENCE + 5):
+            ExperienceData.objects.create(
+                user_account=user, company_name=f"Padding Corp {i}",
+                position="Engineer", description="padding",
+                start_date="2021-01-01", end_date="2022-01-01")
+        for i in range(MAX_DOSSIER_EDUCATION + 5):
+            EducationData.objects.create(
+                user_account=user, institute_university_name=f"Padding U {i}",
+                degree_type="Bachelor", field_of_study="Computer Science",
+                start_date="2016-01-01", end_date="2020-01-01")
+        for i in range(MAX_DOSSIER_SKILLS + 5):
+            skill, _ = SkillSet.objects.get_or_create(skill_name=f"Padding skill {i}")
+            SeekerSkillSet.objects.create(
+                user_account=user, skill_set=skill, skill_level="Beginner")
+
+        text = _build_dossier("candidate_1", _fetch_applications(job_post)[0])
+
+        self.assertEqual(text.count("Experience: "), MAX_DOSSIER_EXPERIENCE)
+        self.assertEqual(text.count("Education: "), MAX_DOSSIER_EDUCATION)
+        skills_line = next(
+            line for line in text.splitlines() if line.startswith("Skills: "))
+        rendered_skills = skills_line[len("Skills: "):].split(", ")
+        self.assertEqual(len(rendered_skills), MAX_DOSSIER_SKILLS)
+
     def test_dossier_assembly_query_count_is_flat(self):
         from django.test.utils import CaptureQueriesContext
         from django.db import connection
@@ -910,6 +949,27 @@ class DossierAssemblyTests(_ScreeningFixture, TestCase):
         self.assertLessEqual(large_queries, 10)
         # The real N+1 guard: cost must not grow with the number of applicants.
         self.assertEqual(small_queries, large_queries)
+
+
+class _ApplyDuringCallModel(FakeStructuredChatModel):
+    """Fake model that runs `on_invoke` while the 'LLM call' is in flight.
+
+    Reproduces an application landing between the applicant fetch and the
+    ScreeningReport row being written.
+    """
+
+    on_invoke: Any = None
+
+    def with_structured_output(self, schema, method="json_schema", *,
+                               include_raw=False, **kwargs):
+        inner = super().with_structured_output(
+            schema, method=method, include_raw=include_raw, **kwargs)
+
+        def _call(payload):
+            self.on_invoke()
+            return inner.invoke(payload)
+
+        return RunnableLambda(_call)
 
 
 class ScreenApplicantsServiceTests(_ScreeningFixture, TestCase):
@@ -1048,6 +1108,48 @@ class ScreenApplicantsServiceTests(_ScreeningFixture, TestCase):
                                 model=self._fake(self._result([("candidate_1", 88)])))
         self.assertFalse(out['cached'])
         self.assertEqual(out['candidates'][0]['score'], 88)
+
+    def test_application_arriving_during_the_llm_call_is_not_lost(self):
+        # The report is stamped with the run's start, not its write time, so an
+        # application that lands mid-call is still "newer" than the report and
+        # invalidates it. Otherwise it is absent from the report AND judged not
+        # newer forever, until some unrelated application happens to arrive.
+        from apps.ai.services import screen_applicants
+        owner = self.make_company_user()
+        job_post = self.make_job_post(owner)
+        self.make_applicant(job_post, "early@example.com")
+
+        model = _ApplyDuringCallModel(
+            parsed_outputs=[self._result([("candidate_1", 50)])],
+            on_invoke=lambda: self.make_applicant(job_post, "midflight@example.com"))
+        first = screen_applicants(owner, job_post_id=job_post.id, model=model)
+        self.assertEqual(first['applicant_count'], 1)
+
+        out = screen_applicants(
+            owner, job_post_id=job_post.id,
+            model=self._fake(self._result([("candidate_1", 60), ("candidate_2", 70)])))
+        self.assertFalse(out['cached'])
+        self.assertEqual(out['applicant_count'], 2)
+
+    def test_excluded_count_never_goes_negative(self):
+        # The pool is COUNTed, then fetched; an application inserted between the
+        # two makes len(applications) > total_applicants.
+        from apps.ai import services
+        owner = self.make_company_user()
+        job_post = self.make_job_post(owner)
+        self.make_applicant(job_post, "race1@example.com")
+        real_fetch = services._fetch_applications
+
+        def racing_fetch(post):
+            self.make_applicant(post, "race2@example.com")
+            return real_fetch(post)
+
+        with patch.object(services, "_fetch_applications", racing_fetch):
+            out = services.screen_applicants(
+                owner, job_post_id=job_post.id,
+                model=self._fake(self._result([("candidate_1", 50),
+                                               ("candidate_2", 60)])))
+        self.assertEqual(out['excluded_count'], 0)
 
     def test_cap_sets_truncated_and_excluded_count(self):
         from datetime import timedelta

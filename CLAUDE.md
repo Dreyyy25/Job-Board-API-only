@@ -112,11 +112,16 @@ Every token-consuming LLM call — including failed-validation retries — write
 Screening uses the **Pro** tier (writer and resume import use Flash), sends at
 most 50 applicants (newest first — beyond that the response carries
 `truncated` plus `excluded_count`), and labels candidates `candidate_1..N` so
-the model never handles a UUID; labels it did not issue are dropped. A stored
-`ScreeningReport` is replayed without an LLM call until `?refresh=true` is
-passed or a `JobPostActivity` newer than `report.created_at` exists — a
-timestamp rule, deliberately not a count, so withdraw-plus-reapply still
-invalidates.
+the model never handles a UUID; labels it did not issue are dropped. Each
+dossier is also capped per section (10 education / 15 experience / 30 skills,
+constants in `services.py`) — seekers create those rows through unrestricted
+viewsets, so an uncapped dossier is an applicant-controlled cost amplifier.
+A stored `ScreeningReport` is replayed without an LLM call until
+`?refresh=true` is passed or a `JobPostActivity` newer than
+`report.created_at` exists — a timestamp rule, deliberately not a count, so
+withdraw-plus-reapply still invalidates. `created_at` is stamped with the
+**run's start**, not the row's write time, so an application arriving during
+the LLM call still invalidates the report instead of being lost forever.
 
 ### Query hygiene
 

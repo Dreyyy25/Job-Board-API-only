@@ -4,6 +4,7 @@ import logging
 import time
 
 from django.core.exceptions import ValidationError  # malformed UUID -> 404, not 500
+from django.utils import timezone
 
 from apps.companies.models import Company
 from apps.jobs.models import JobPost, JobPostActivity
@@ -84,6 +85,12 @@ MAX_RESUME_BYTES = 5 * 1024 * 1024
 MAX_SCREENED_APPLICANTS = 50
 _COVER_LETTER_CHARS = 500
 _EXPERIENCE_DESC_CHARS = 300
+# Row caps per dossier section. Seekers create these rows through unrestricted
+# viewsets, so without a cap one applicant could pad a dossier to megabytes of
+# prompt text — billed to the company and able to blow the run's timeout.
+MAX_DOSSIER_EDUCATION = 10
+MAX_DOSSIER_EXPERIENCE = 15
+MAX_DOSSIER_SKILLS = 30
 
 
 def _fetch_applications(job_post):
@@ -128,15 +135,18 @@ def _build_dossier(label, activity):
     """Compact plain-text dossier for one applicant.
 
     Never includes the applicant's email — name only, per the privacy rule.
-    All related sets are read with .all() so the prefetch cache is used.
+    All related sets are read with .all() so the prefetch cache is used, and
+    the per-section caps slice the materialized list — slicing the queryset
+    instead would issue a fresh LIMIT query and reintroduce the N+1.
     """
     user = activity.user_account
     lines = [f"{label}:", f"Name: {_seeker_name(user) or 'Not provided'}"]
 
-    skills = [f"{s.skill_set.skill_name} ({s.skill_level})" for s in user.skills.all()]
+    skills = [f"{s.skill_set.skill_name} ({s.skill_level})"
+              for s in list(user.skills.all())[:MAX_DOSSIER_SKILLS]]
     lines.append("Skills: " + (", ".join(skills) or "none listed"))
 
-    for edu in user.education.all():
+    for edu in list(user.education.all())[:MAX_DOSSIER_EDUCATION]:
         span = _date_span(edu.start_date, edu.end_date)
         lines.append(
             f"Education: {edu.degree_type or 'Unspecified'} in "
@@ -145,7 +155,7 @@ def _build_dossier(label, activity):
             + (f" ({span})" if span else "")
         )
 
-    for exp in user.experiences.all():
+    for exp in list(user.experiences.all())[:MAX_DOSSIER_EXPERIENCE]:
         span = _date_span(exp.start_date, exp.end_date)
         description = exp.description[:_EXPERIENCE_DESC_CHARS]
         lines.append(
@@ -339,6 +349,13 @@ def screen_applicants(user, *, job_post_id, refresh=False, model=None):
         if job_post.company.user_account_id != user.id:
             raise ScreeningPermissionError()
 
+    # The report is stamped with the run's start, not its write time: the LLM
+    # call can take the better part of a minute, and an application arriving in
+    # that window is absent from the report. Stamping it later would judge that
+    # application "not newer" forever. Conservative (one extra run at the
+    # boundary) beats leaky (the applicant is never screened).
+    run_started = timezone.now()
+
     # Count first, cache second: an emptied pool must 409 rather than replay a
     # report about applications that no longer exist — the one extra COUNT on
     # the cache-hit path is the price.
@@ -405,8 +422,11 @@ def screen_applicants(user, *, job_post_id, refresh=False, model=None):
         report={
             'candidates': candidates,
             'truncated': total_applicants > MAX_SCREENED_APPLICANTS,
-            'excluded_count': total_applicants - len(applications),
+            # max(0, ...): an application landing between the COUNT and the
+            # fetch makes len(applications) the larger of the two.
+            'excluded_count': max(0, total_applicants - len(applications)),
         },
         applicant_count=len(applications),
+        created_at=run_started,
     )
     return _screening_response(job_post, report, cached=False)
