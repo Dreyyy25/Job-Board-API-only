@@ -1703,3 +1703,213 @@ class CheckpointerSetupCommandTests(TestCase):
             call_command("ai_checkpointer_setup", stdout=out)
         fake.return_value.setup.assert_called_once_with()
         self.assertIn("checkpointer tables ready", out.getvalue().lower())
+
+
+class _ChatToolFixture:
+    """A seeker, a company, published jobs, plus unpublished and inactive ones."""
+
+    def setUp(self):
+        from apps.jobs.models import JobLocation, JobPost, JobPostSkillSet, JobType
+        from apps.seekers.models import SeekerSkillSet, SkillSet
+
+        self.seeker = UserAccount.objects.create_user(
+            email="seeker@example.com", password="Str0ng-Password!", user_type="job_seeker")
+        profile = self.seeker.seeker_profile
+        profile.first_name, profile.last_name = "Ada", "Lovelace"
+        profile.save()
+
+        self.company_user = UserAccount.objects.create_user(
+            email="hire@example.com", password="Str0ng-Password!", user_type="company")
+        self.company = self.company_user.company_profile
+        self.company.company_name = "Acme"
+        self.company.save()
+
+        self.job_type = JobType.objects.create(job_type_name="Full Time")
+        self.location = JobLocation.objects.create(city="Berlin", country="Germany")
+
+        self.python = SkillSet.objects.create(skill_name="Python")
+        self.django_skill = SkillSet.objects.create(skill_name="Django")
+        self.rust = SkillSet.objects.create(skill_name="Rust")
+
+        SeekerSkillSet.objects.create(
+            user_account=self.seeker, skill_set=self.python, skill_level="Advanced")
+        SeekerSkillSet.objects.create(
+            user_account=self.seeker, skill_set=self.django_skill, skill_level="Intermediate")
+
+        self.job = JobPost.objects.create(
+            company=self.company, job_type=self.job_type, job_location=self.location,
+            job_title="Senior Python Developer",
+            job_description="Build APIs with Django.",
+            job_description_hidden="SECRET internal budget notes",
+            is_published=True, is_active=True)
+        JobPostSkillSet.objects.create(
+            job_post=self.job, skill_set=self.python, skill_level="Advanced", is_required=True)
+        JobPostSkillSet.objects.create(
+            job_post=self.job, skill_set=self.rust, skill_level="Advanced", is_required=True)
+
+        self.other_job = JobPost.objects.create(
+            company=self.company, job_type=self.job_type, job_location=self.location,
+            job_title="Rust Engineer", job_description="Systems work.",
+            is_published=True, is_active=True)
+        self.unpublished = JobPost.objects.create(
+            company=self.company, job_type=self.job_type, job_location=self.location,
+            job_title="Stealth Role", job_description="Not announced yet.",
+            is_published=False, is_active=True)
+        self.inactive = JobPost.objects.create(
+            company=self.company, job_type=self.job_type, job_location=self.location,
+            job_title="Closed Role", job_description="Filled.",
+            is_published=True, is_active=False)
+
+    def _tools(self, user=None):
+        from apps.ai.tools import build_tools
+        return {t.name: t for t in build_tools(user or self.seeker)}
+
+
+class BuildToolsTests(_ChatToolFixture, TestCase):
+    def test_exposes_exactly_the_four_read_only_tools(self):
+        from apps.ai.tools import build_tools
+        self.assertEqual([t.name for t in build_tools(self.seeker)],
+                         ["search_jobs", "get_job_details", "get_my_profile", "compare_fit"])
+
+    def test_no_tool_accepts_a_user_id(self):
+        """Closures over the user, never an LLM-supplied identity."""
+        from apps.ai.tools import build_tools
+        for tool in build_tools(self.seeker):
+            for arg in tool.args:
+                self.assertNotIn("user", arg.lower(), f"{tool.name} exposes {arg}")
+
+
+class SearchJobsToolTests(_ChatToolFixture, TestCase):
+    def test_returns_published_active_jobs(self):
+        self.assertIn("Senior Python Developer",
+                      self._tools()["search_jobs"].invoke({"keywords": "python"}))
+
+    def test_never_returns_unpublished_or_inactive_jobs(self):
+        out = self._tools()["search_jobs"].invoke({"keywords": ""})
+        self.assertNotIn("Stealth Role", out)
+        self.assertNotIn("Closed Role", out)
+
+    def test_never_leaks_hidden_description(self):
+        self.assertNotIn("SECRET",
+                         self._tools()["search_jobs"].invoke({"keywords": "python"}))
+
+    def test_filters_by_city(self):
+        tool = self._tools()["search_jobs"]
+        self.assertIn("Senior Python Developer",
+                      tool.invoke({"keywords": "", "city": "Berlin"}))
+        self.assertIn("No matching", tool.invoke({"keywords": "", "city": "Lisbon"}))
+
+    def test_result_count_is_capped(self):
+        from apps.jobs.models import JobPost
+        from apps.ai.tools import MAX_SEARCH_RESULTS
+        for i in range(MAX_SEARCH_RESULTS + 5):
+            JobPost.objects.create(
+                company=self.company, job_type=self.job_type, job_location=self.location,
+                job_title=f"Extra Python Role {i}", job_description="x",
+                is_published=True, is_active=True)
+        out = self._tools()["search_jobs"].invoke({"keywords": "python"})
+        self.assertLessEqual(out.count("- id="), MAX_SEARCH_RESULTS)
+
+    def test_empty_result_is_explicit(self):
+        self.assertIn("No matching",
+                      self._tools()["search_jobs"].invoke({"keywords": "cobol"}))
+
+    def test_query_budget(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        tool = self._tools()["search_jobs"]
+        with CaptureQueriesContext(connection) as ctx:
+            tool.invoke({"keywords": "python"})
+        self.assertLessEqual(len(ctx), 10)
+
+
+class GetJobDetailsToolTests(_ChatToolFixture, TestCase):
+    def test_returns_details_including_required_skills(self):
+        out = self._tools()["get_job_details"].invoke({"job_post_id": str(self.job.id)})
+        self.assertIn("Acme", out)
+        # Assert on a token only the skills section can produce — plain "Python"
+        # also appears in the job title, so it would pass for the wrong reason.
+        self.assertIn("Python (Advanced, required)", out)
+        self.assertIn("Rust", out)
+
+    def test_never_leaks_hidden_description(self):
+        self.assertNotIn("SECRET", self._tools()["get_job_details"].invoke(
+            {"job_post_id": str(self.job.id)}))
+
+    def test_unpublished_job_is_not_found(self):
+        self.assertIn("not found", self._tools()["get_job_details"].invoke(
+            {"job_post_id": str(self.unpublished.id)}).lower())
+
+    def test_unknown_id_returns_not_found_not_an_exception(self):
+        self.assertIn("not found", self._tools()["get_job_details"].invoke(
+            {"job_post_id": "00000000-0000-0000-0000-000000000000"}).lower())
+
+    def test_malformed_id_returns_not_found_not_an_exception(self):
+        """The model will invent ids. A ValueError here would 500 the request."""
+        self.assertIn("not found", self._tools()["get_job_details"].invoke(
+            {"job_post_id": "not-a-uuid"}).lower())
+
+    def test_description_is_length_capped(self):
+        from apps.ai.tools import MAX_TOOL_DESCRIPTION_CHARS
+        self.job.job_description = "y" * (MAX_TOOL_DESCRIPTION_CHARS + 500)
+        self.job.save()
+        out = self._tools()["get_job_details"].invoke({"job_post_id": str(self.job.id)})
+        self.assertLess(out.count("y"), MAX_TOOL_DESCRIPTION_CHARS + 100)
+
+
+class GetMyProfileToolTests(_ChatToolFixture, TestCase):
+    def test_returns_the_bound_users_profile(self):
+        out = self._tools()["get_my_profile"].invoke({})
+        self.assertIn("Ada Lovelace", out)
+        self.assertIn("Python", out)
+
+    def test_takes_no_arguments(self):
+        self.assertEqual(self._tools()["get_my_profile"].args, {})
+
+    def test_is_bound_to_the_user_passed_to_build_tools(self):
+        """Two seekers, two tool sets, no crosstalk."""
+        other = UserAccount.objects.create_user(
+            email="other@example.com", password="Str0ng-Password!", user_type="job_seeker")
+        other.seeker_profile.first_name = "Grace"
+        other.seeker_profile.last_name = "Hopper"
+        other.seeker_profile.save()
+        mine = self._tools()["get_my_profile"].invoke({})
+        theirs = self._tools(other)["get_my_profile"].invoke({})
+        self.assertIn("Ada Lovelace", mine)
+        self.assertNotIn("Grace Hopper", mine)
+        self.assertIn("Grace Hopper", theirs)
+        self.assertNotIn("Ada Lovelace", theirs)
+
+    def test_never_includes_the_users_email(self):
+        self.assertNotIn("seeker@example.com",
+                         self._tools()["get_my_profile"].invoke({}))
+
+    def test_query_budget(self):
+        """Skills join skill_set; without select_related this is an N+1."""
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        tool = self._tools()["get_my_profile"]
+        with CaptureQueriesContext(connection) as ctx:
+            tool.invoke({})
+        self.assertLessEqual(len(ctx), 10)
+
+
+class CompareFitToolTests(_ChatToolFixture, TestCase):
+    def test_reports_matched_and_missing_skills(self):
+        out = self._tools()["compare_fit"].invoke({"job_post_id": str(self.job.id)})
+        self.assertIn("Matched: Python", out)
+        self.assertIn("Missing: Rust", out)
+        self.assertIn("1 of 2", out)
+
+    def test_overlap_is_computed_in_python_not_guessed(self):
+        """Deterministic arithmetic — the agent only narrates the result."""
+        self.assertIn("0 of 0", self._tools()["compare_fit"].invoke(
+            {"job_post_id": str(self.other_job.id)}))
+
+    def test_unpublished_job_is_not_found(self):
+        self.assertIn("not found", self._tools()["compare_fit"].invoke(
+            {"job_post_id": str(self.unpublished.id)}).lower())
+
+    def test_malformed_id_returns_not_found(self):
+        self.assertIn("not found",
+                      self._tools()["compare_fit"].invoke({"job_post_id": "nope"}).lower())
