@@ -15,6 +15,7 @@ SECURE_SSL_REDIRECT = False
 SECURE_HSTS_SECONDS = 0
 SESSION_COOKIE_SECURE = False
 CSRF_COOKIE_SECURE = False
+AUTH_REFRESH_COOKIE_SECURE = False
 
 # Print emails to stdout instead of sending.
 EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'

@@ -26,6 +26,9 @@ SECURE_HSTS_PRELOAD = config.SECURE_HSTS_PRELOAD
 # Hardcoded True — cookies over HTTPS only.
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
+# Cross-domain deploys additionally need SameSite=None + pinned
+# CORS_ALLOWED_ORIGINS — future hardening, not now.
+AUTH_REFRESH_COOKIE_SECURE = True
 
 # Fail-fast on misconfiguration. Clearer than a silent bad-deploy.
 assert not DEBUG, "DEBUG must be False in production"

@@ -16,13 +16,13 @@ from . import services
 from .models import UserAccount
 from .serializers import UserAccountSerializer, RegisterSerializer
 from .authentication import CustomJWTAuthentication
+from .cookies import set_refresh_cookie
 from .permissions import IsOwnerOrAdmin
 
 
 _TokensSerializer = inline_serializer(
     name='AuthTokens',
     fields={
-        'refresh': drf_serializers.CharField(),
         'access': drf_serializers.CharField(),
     },
 )
@@ -163,7 +163,8 @@ def register(request):
         return Response({'password': list(e.messages)},
                         status=status.HTTP_400_BAD_REQUEST)
 
-    return Response({
+    refresh_token = tokens.pop('refresh')
+    response = Response({
         'message': 'User created successfully',
         'user': {
             'id': str(user.id),
@@ -173,6 +174,8 @@ def register(request):
         'tokens': tokens,
         'profile': _serialize_profile(user),
     }, status=status.HTTP_201_CREATED)
+    set_refresh_cookie(response, refresh_token)
+    return response
 
 
 # Login endpoint
@@ -204,7 +207,8 @@ def login(request):
         return Response({'error': 'Invalid credentials'},
                         status=status.HTTP_401_UNAUTHORIZED)
 
-    return Response({
+    refresh_token = tokens.pop('refresh')
+    response = Response({
         'message': 'Login successful',
         'user': {
             'id': str(user.id),
@@ -213,6 +217,8 @@ def login(request):
         },
         'tokens': tokens,
     }, status=status.HTTP_200_OK)
+    set_refresh_cookie(response, refresh_token)
+    return response
 
 # Current user's account endpoint
 @extend_schema(

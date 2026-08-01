@@ -17,6 +17,9 @@ SECURE_SSL_REDIRECT = False
 SECURE_HSTS_SECONDS = 0
 SESSION_COOKIE_SECURE = False
 CSRF_COOKIE_SECURE = False
+# test.py imports from base only (not development), so this must be set
+# explicitly here too or AUTH_REFRESH_COOKIE_SECURE won't resolve.
+AUTH_REFRESH_COOKIE_SECURE = False
 
 # CORS settings — tests rely on override_settings to enable specific origins.
 CORS_ALLOW_ALL_ORIGINS = False

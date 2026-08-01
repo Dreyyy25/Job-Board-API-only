@@ -112,6 +112,57 @@ class LogoutTests(APITestCase):
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
 
 
+class CookieAuthTests(APITestCase):
+    """Refresh tokens move to an httpOnly cookie; body keeps only access."""
+
+    def _assert_refresh_cookie_set(self, response):
+        cookie_conf = django_settings.AUTH_REFRESH_COOKIE
+        name = cookie_conf["NAME"]
+        self.assertIn(name, response.cookies,
+                      f"Expected {name!r} cookie in response")
+        morsel = response.cookies[name]
+        self.assertTrue(morsel["httponly"])
+        self.assertEqual(morsel["samesite"], "Lax")
+        self.assertEqual(morsel["path"], "/api/v1/accounts/")
+        self.assertEqual(morsel["max-age"], 604800)  # 7 days
+        self.assertTrue(morsel.value, "Refresh token cookie value is empty")
+
+        self.assertIn("access", response.data["tokens"])
+        self.assertNotIn("refresh", response.data["tokens"])
+
+    def test_register_sets_refresh_cookie_and_omits_it_from_body(self):
+        r = self.client.post("/api/v1/accounts/register/", {
+            "email": "cookie-register@example.com",
+            "password": "Str0ng-Password!",
+            "user_type": "job_seeker",
+        }, format="json")
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        self._assert_refresh_cookie_set(r)
+        self.assertEqual(r.data["user"], {
+            "id": r.data["user"]["id"],
+            "email": "cookie-register@example.com",
+            "user_type": "job_seeker",
+        })
+
+    def test_login_sets_refresh_cookie_and_omits_it_from_body(self):
+        UserAccount.objects.create_user(
+            email="cookie-login@example.com",
+            password="Str0ng-Password!",
+            user_type="job_seeker",
+        )
+        r = self.client.post("/api/v1/accounts/login/", {
+            "email": "cookie-login@example.com",
+            "password": "Str0ng-Password!",
+        }, format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self._assert_refresh_cookie_set(r)
+        self.assertEqual(r.data["user"], {
+            "id": r.data["user"]["id"],
+            "email": "cookie-login@example.com",
+            "user_type": "job_seeker",
+        })
+
+
 from django.core.cache import cache
 
 

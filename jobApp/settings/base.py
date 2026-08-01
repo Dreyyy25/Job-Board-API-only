@@ -133,6 +133,19 @@ SIMPLE_JWT = {
     'SLIDING_TOKEN_REFRESH_LIFETIME': timedelta(days=1),
 }
 
+# Refresh-token cookie — httpOnly so JS never sees it; access token still
+# travels in the JSON response body. Scoped to the accounts path since only
+# login/register/token-refresh/logout ever need to read or clear it.
+# AUTH_REFRESH_COOKIE_SECURE is env-differing (dev/test False, prod True)
+# and is set per-settings-module below.
+AUTH_REFRESH_COOKIE = {
+    "NAME": "refresh_token",
+    "PATH": "/api/v1/accounts/",          # scoped: only auth endpoints ever receive it
+    "SAMESITE": "Lax",
+    "HTTPONLY": True,
+    "MAX_AGE": int(SIMPLE_JWT["REFRESH_TOKEN_LIFETIME"].total_seconds()),  # derive, don't hardcode
+}
+
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'corsheaders.middleware.CorsMiddleware',
