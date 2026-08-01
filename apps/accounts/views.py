@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.contrib.auth.hashers import make_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from drf_spectacular.utils import (
@@ -16,7 +17,7 @@ from . import services
 from .models import UserAccount
 from .serializers import UserAccountSerializer, RegisterSerializer
 from .authentication import CustomJWTAuthentication
-from .cookies import set_refresh_cookie
+from .cookies import delete_refresh_cookie, set_refresh_cookie
 from .permissions import IsOwnerOrAdmin
 
 
@@ -53,11 +54,6 @@ _LoginRequestSerializer = inline_serializer(
         'email': drf_serializers.EmailField(),
         'password': drf_serializers.CharField(write_only=True),
     },
-)
-
-_LogoutRequestSerializer = inline_serializer(
-    name='LogoutRequest',
-    fields={'refresh': drf_serializers.CharField()},
 )
 
 _ErrorSerializer = inline_serializer(
@@ -258,7 +254,7 @@ def me(request):
 
 # Logout endpoint
 @extend_schema(
-    request=_LogoutRequestSerializer,
+    request=None,
     responses={
         205: OpenApiResponse(description='Token blacklisted'),
         400: _ErrorSerializer,
@@ -268,11 +264,17 @@ def me(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def logout(request):
-    """Blacklist the supplied refresh token."""
+    """Blacklist the refresh token cookie and clear it."""
+    cookie_name = settings.AUTH_REFRESH_COOKIE['NAME']
+    refresh_token = request.COOKIES.get(cookie_name)
     try:
-        services.logout_user(request.data.get('refresh'))
+        services.logout_user(refresh_token)
     except services.InvalidTokenError as e:
         msg = str(e) or 'invalid or expired refresh token'
-        return Response({'error': msg},
+        response = Response({'error': msg},
                         status=status.HTTP_400_BAD_REQUEST)
-    return Response(status=status.HTTP_205_RESET_CONTENT)
+        delete_refresh_cookie(response)
+        return response
+    response = Response(status=status.HTTP_205_RESET_CONTENT)
+    delete_refresh_cookie(response)
+    return response

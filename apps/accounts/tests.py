@@ -97,14 +97,15 @@ class LogoutTests(APITestCase):
         )
         self.refresh = RefreshToken.for_user(self.user)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.refresh.access_token}")
+        self.cookie_name = django_settings.AUTH_REFRESH_COOKIE["NAME"]
 
     def test_logout_blacklists_refresh_token(self):
-        r = self.client.post("/api/v1/accounts/logout/",
-                             {"refresh": str(self.refresh)}, format="json")
+        self.client.cookies[self.cookie_name] = str(self.refresh)
+        r = self.client.post("/api/v1/accounts/logout/", format="json")
         self.assertEqual(r.status_code, status.HTTP_205_RESET_CONTENT)
         self.client.credentials()  # drop auth header
-        r2 = self.client.post("/api/v1/accounts/token/refresh/",
-                              {"refresh": str(self.refresh)}, format="json")
+        self.client.cookies[self.cookie_name] = str(self.refresh)
+        r2 = self.client.post("/api/v1/accounts/token/refresh/", {}, format="json")
         self.assertEqual(r2.status_code, status.HTTP_401_UNAUTHORIZED)
 
     def test_logout_missing_refresh_returns_400(self):
@@ -161,6 +162,81 @@ class CookieAuthTests(APITestCase):
             "email": "cookie-login@example.com",
             "user_type": "job_seeker",
         })
+
+    def test_refresh_rotates_cookie_and_blacklists_old_token(self):
+        name = django_settings.AUTH_REFRESH_COOKIE["NAME"]
+        user = UserAccount.objects.create_user(
+            email="cookie-refresh@example.com",
+            password="Str0ng-Password!",
+            user_type="job_seeker",
+        )
+        old_refresh = RefreshToken.for_user(user)
+        self.client.cookies[name] = str(old_refresh)
+
+        r = self.client.post("/api/v1/accounts/token/refresh/", {}, format="json")
+
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertIn("access", r.data)
+        self.assertNotIn("refresh", r.data)
+
+        self.assertIn(name, r.cookies)
+        new_refresh_value = r.cookies[name].value
+        self.assertTrue(new_refresh_value)
+        self.assertNotEqual(new_refresh_value, str(old_refresh))
+
+        # Replaying the old (now-rotated) refresh token must be rejected —
+        # proves BLACKLIST_AFTER_ROTATION actually ran, not just that a new
+        # token was minted.
+        self.client.cookies[name] = str(old_refresh)
+        r2 = self.client.post("/api/v1/accounts/token/refresh/", {}, format="json")
+        self.assertEqual(r2.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_refresh_without_cookie_returns_401(self):
+        r = self.client.post("/api/v1/accounts/token/refresh/", {}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertIn("detail", r.data)
+
+    def test_logout_with_cookie_blacklists_and_clears_cookie(self):
+        name = django_settings.AUTH_REFRESH_COOKIE["NAME"]
+        user = UserAccount.objects.create_user(
+            email="cookie-logout@example.com",
+            password="Str0ng-Password!",
+            user_type="job_seeker",
+        )
+        refresh = RefreshToken.for_user(user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+        self.client.cookies[name] = str(refresh)
+
+        r = self.client.post("/api/v1/accounts/logout/", format="json")
+
+        self.assertEqual(r.status_code, status.HTTP_205_RESET_CONTENT)
+        self.assertIn(name, r.cookies)
+        self.assertEqual(r.cookies[name].value, "")
+        self.assertEqual(r.cookies[name]["max-age"], 0)
+
+        # Blacklisted at logout — a refresh with the same token must 401.
+        self.client.credentials()
+        self.client.cookies[name] = str(refresh)
+        r2 = self.client.post("/api/v1/accounts/token/refresh/", {}, format="json")
+        self.assertEqual(r2.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_logout_without_cookie_returns_400(self):
+        user = UserAccount.objects.create_user(
+            email="cookie-logout-missing@example.com",
+            password="Str0ng-Password!",
+            user_type="job_seeker",
+        )
+        refresh = RefreshToken.for_user(user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        r = self.client.post("/api/v1/accounts/logout/", format="json")
+
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("error", r.data)
+        # Defensive clear even on failure.
+        name = django_settings.AUTH_REFRESH_COOKIE["NAME"]
+        self.assertIn(name, r.cookies)
+        self.assertEqual(r.cookies[name].value, "")
 
 
 from django.core.cache import cache
