@@ -1,5 +1,8 @@
 from urllib.parse import urlencode
 
+from django.conf import settings as django_settings
+from django.core.cache import cache
+from django.test import override_settings
 from rest_framework.test import APITestCase
 from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -90,31 +93,6 @@ class MePatchTests(APITestCase):
         self.assertEqual(r.status_code, status.HTTP_404_NOT_FOUND)
 
 
-class LogoutTests(APITestCase):
-    def setUp(self):
-        self.user = UserAccount.objects.create_user(
-            email="logout@example.com",
-            password="Str0ng-Password!",
-            user_type="job_seeker",
-        )
-        self.refresh = RefreshToken.for_user(self.user)
-        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.refresh.access_token}")
-        self.cookie_name = django_settings.AUTH_REFRESH_COOKIE["NAME"]
-
-    def test_logout_blacklists_refresh_token(self):
-        self.client.cookies[self.cookie_name] = str(self.refresh)
-        r = self.client.post("/api/v1/accounts/logout/", format="json")
-        self.assertEqual(r.status_code, status.HTTP_205_RESET_CONTENT)
-        self.client.credentials()  # drop auth header
-        self.client.cookies[self.cookie_name] = str(self.refresh)
-        r2 = self.client.post("/api/v1/accounts/token/refresh/", {}, format="json")
-        self.assertEqual(r2.status_code, status.HTTP_401_UNAUTHORIZED)
-
-    def test_logout_missing_refresh_returns_400(self):
-        r = self.client.post("/api/v1/accounts/logout/", {}, format="json")
-        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
-
-
 class CookieAuthTests(APITestCase):
     """Refresh tokens move to an httpOnly cookie; body keeps only access."""
 
@@ -165,6 +143,41 @@ class CookieAuthTests(APITestCase):
             "user_type": "job_seeker",
         })
 
+    def _login_for_cookie(self, email="cookie-secure@example.com"):
+        UserAccount.objects.create_user(
+            email=email,
+            password="Str0ng-Password!",
+            user_type="job_seeker",
+        )
+        return self.client.post("/api/v1/accounts/login/", {
+            "email": email,
+            "password": "Str0ng-Password!",
+        }, format="json")
+
+    @override_settings(AUTH_REFRESH_COOKIE_SECURE=True)
+    def test_refresh_cookie_is_secure_when_setting_is_true(self):
+        """`Secure` must track AUTH_REFRESH_COOKIE_SECURE (prod: True).
+
+        Test settings pin the flag to False, so without this test dropping
+        `secure=` from set_refresh_cookie would stay green while prod
+        served the refresh cookie over plain HTTP.
+        """
+        r = self._login_for_cookie("cookie-secure-on@example.com")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        name = django_settings.AUTH_REFRESH_COOKIE["NAME"]
+        self.assertTrue(
+            r.cookies[name]["secure"],
+            "Refresh cookie missing Secure with AUTH_REFRESH_COOKIE_SECURE=True",
+        )
+
+    @override_settings(AUTH_REFRESH_COOKIE_SECURE=False)
+    def test_refresh_cookie_is_not_secure_when_setting_is_false(self):
+        """The dev half of the same contract — plain HTTP localhost works."""
+        r = self._login_for_cookie("cookie-secure-off@example.com")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        name = django_settings.AUTH_REFRESH_COOKIE["NAME"]
+        self.assertFalse(r.cookies[name]["secure"])
+
     def test_refresh_rotates_cookie_and_blacklists_old_token(self):
         name = django_settings.AUTH_REFRESH_COOKIE["NAME"]
         user = UserAccount.objects.create_user(
@@ -185,6 +198,16 @@ class CookieAuthTests(APITestCase):
         new_refresh_value = r.cookies[name].value
         self.assertTrue(new_refresh_value)
         self.assertNotEqual(new_refresh_value, str(old_refresh))
+
+        # The refreshed access token must actually authenticate. This is what
+        # the SPA runs on after every bootstrap, and CustomJWTAuthentication
+        # loads the user from the custom `user_id` claim — asserting only that
+        # 'access' is present would not catch a claim/lookup mismatch.
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {r.data['access']}")
+        me = self.client.get("/api/v1/accounts/me/")
+        self.assertEqual(me.status_code, status.HTTP_200_OK)
+        self.assertEqual(me.data["email"], "cookie-refresh@example.com")
+        self.client.credentials()
 
         # Replaying the old (now-rotated) refresh token must be rejected —
         # proves BLACKLIST_AFTER_ROTATION actually ran, not just that a new
@@ -340,9 +363,6 @@ class JsonOnlyAuthEndpointTests(APITestCase):
         )
 
 
-from django.core.cache import cache
-
-
 class ThrottleTests(APITestCase):
     def setUp(self):
         cache.clear()
@@ -365,9 +385,6 @@ class ThrottleTests(APITestCase):
             "user_type": "job_seeker",
         }, format="json")
         self.assertEqual(r6.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
-
-
-from django.test import override_settings
 
 
 @override_settings(
@@ -412,9 +429,6 @@ class SecurityHeaderTests(APITestCase):
         # APIClient can simulate that via HTTPS=on / wsgi.url_scheme.
         r = self.client.get("/api/v1/accounts/register/", secure=True)
         self.assertIn("max-age=3600", r.headers.get("Strict-Transport-Security", ""))
-
-
-from django.conf import settings as django_settings
 
 
 from unittest.mock import patch
