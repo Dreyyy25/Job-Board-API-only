@@ -16,6 +16,12 @@ from apps.seekers.models import SeekerSkillSet
 MAX_SEARCH_RESULTS = 5
 MAX_TOOL_DESCRIPTION_CHARS = 800
 MAX_PROFILE_ROWS = 15
+# A company can attach one JobPostSkillSet row per catalog SkillSet to a single
+# post — JobPostSkillSetViewSet is a plain ModelViewSet with only a
+# unique_together constraint, no per-job count cap — so an uncapped skills read
+# is a company-controlled cost amplifier on billed tool output, same risk class
+# as the Phase 3 screening dossier's per-applicant skill cap.
+MAX_JOB_SKILLS = 30
 NOT_FOUND = "Job not found, or it is not currently published."
 
 
@@ -73,7 +79,7 @@ def build_tools(user):
         skills = ", ".join(
             f"{s.skill_set.skill_name} ({s.skill_level},"
             f" {'required' if s.is_required else 'nice-to-have'})"
-            for s in job.required_skills.all()
+            for s in job.required_skills.all()[:MAX_JOB_SKILLS]
         ) or "none listed"
         salary = ""
         if job.salary_min or job.salary_max:
@@ -122,7 +128,10 @@ def build_tools(user):
         job = _get_published_job(job_post_id)
         if job is None:
             return NOT_FOUND
-        required = {s.skill_set.skill_name for s in job.required_skills.all()}
+        # Same MAX_JOB_SKILLS cap as get_job_details — a company-controlled
+        # skill count must not translate into unbounded billed tool output.
+        required = {s.skill_set.skill_name
+                    for s in job.required_skills.all()[:MAX_JOB_SKILLS]}
         mine = {s.skill_set.skill_name
                 for s in SeekerSkillSet.objects.for_user(user).with_related()}
         matched = sorted(required & mine)

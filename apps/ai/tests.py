@@ -1815,8 +1815,22 @@ class SearchJobsToolTests(_ChatToolFixture, TestCase):
                       self._tools()["search_jobs"].invoke({"keywords": "cobol"}))
 
     def test_query_budget(self):
+        """8 matching published jobs, each with its own skills — dropping
+        with_related() would add ~3 queries per job (company, job_location,
+        job_type) and blow the ceiling; a couple of skill rows per job also
+        load the shared with_related() prefetch."""
         from django.db import connection
         from django.test.utils import CaptureQueriesContext
+        from apps.jobs.models import JobPost, JobPostSkillSet
+        for i in range(8):
+            job = JobPost.objects.create(
+                company=self.company, job_type=self.job_type, job_location=self.location,
+                job_title=f"Python Role {i}", job_description="x",
+                is_published=True, is_active=True)
+            JobPostSkillSet.objects.create(
+                job_post=job, skill_set=self.python, skill_level="Advanced", is_required=True)
+            JobPostSkillSet.objects.create(
+                job_post=job, skill_set=self.rust, skill_level="Advanced", is_required=True)
         tool = self._tools()["search_jobs"]
         with CaptureQueriesContext(connection) as ctx:
             tool.invoke({"keywords": "python"})
@@ -1840,6 +1854,10 @@ class GetJobDetailsToolTests(_ChatToolFixture, TestCase):
         self.assertIn("not found", self._tools()["get_job_details"].invoke(
             {"job_post_id": str(self.unpublished.id)}).lower())
 
+    def test_inactive_job_is_not_found(self):
+        self.assertIn("not found", self._tools()["get_job_details"].invoke(
+            {"job_post_id": str(self.inactive.id)}).lower())
+
     def test_unknown_id_returns_not_found_not_an_exception(self):
         self.assertIn("not found", self._tools()["get_job_details"].invoke(
             {"job_post_id": "00000000-0000-0000-0000-000000000000"}).lower())
@@ -1855,6 +1873,22 @@ class GetJobDetailsToolTests(_ChatToolFixture, TestCase):
         self.job.save()
         out = self._tools()["get_job_details"].invoke({"job_post_id": str(self.job.id)})
         self.assertLess(out.count("y"), MAX_TOOL_DESCRIPTION_CHARS + 100)
+
+    def test_skills_list_is_capped(self):
+        """A company can attach one JobPostSkillSet row per catalog SkillSet
+        with no per-job count cap — the rendered list must not grow with it."""
+        from apps.ai.tools import MAX_JOB_SKILLS
+        from apps.jobs.models import JobPostSkillSet
+        from apps.seekers.models import SkillSet
+        for i in range(MAX_JOB_SKILLS + 5):
+            skill = SkillSet.objects.create(skill_name=f"ExtraSkill{i}")
+            JobPostSkillSet.objects.create(
+                job_post=self.job, skill_set=skill, skill_level="Advanced", is_required=True)
+        out = self._tools()["get_job_details"].invoke({"job_post_id": str(self.job.id)})
+        # self.job already has 2 required skills (Python, Rust) from setUp;
+        # + MAX_JOB_SKILLS + 5 more = well past the cap. Every entry created
+        # here renders as "..., required)" — count them, don't guess.
+        self.assertEqual(out.count(", required)"), MAX_JOB_SKILLS)
 
 
 class GetMyProfileToolTests(_ChatToolFixture, TestCase):
@@ -1885,9 +1919,23 @@ class GetMyProfileToolTests(_ChatToolFixture, TestCase):
                          self._tools()["get_my_profile"].invoke({}))
 
     def test_query_budget(self):
-        """Skills join skill_set; without select_related this is an N+1."""
+        """8 skill rows plus several education/experience rows — skills join
+        skill_set, and without select_related each relation is an N+1 that
+        this row count is large enough to actually breach the ceiling with."""
         from django.db import connection
         from django.test.utils import CaptureQueriesContext
+        from apps.seekers.models import EducationData, ExperienceData, SeekerSkillSet, SkillSet
+        for i in range(8):
+            skill = SkillSet.objects.create(skill_name=f"ProfileSkill{i}")
+            SeekerSkillSet.objects.create(
+                user_account=self.seeker, skill_set=skill, skill_level="Advanced")
+        for i in range(5):
+            EducationData.objects.create(
+                user_account=self.seeker, institute_university_name=f"University {i}",
+                degree_type="Bachelor", field_of_study="Computer Science")
+        for i in range(5):
+            ExperienceData.objects.create(
+                user_account=self.seeker, company_name=f"Company {i}", position="Engineer")
         tool = self._tools()["get_my_profile"]
         with CaptureQueriesContext(connection) as ctx:
             tool.invoke({})
@@ -1910,6 +1958,23 @@ class CompareFitToolTests(_ChatToolFixture, TestCase):
         self.assertIn("not found", self._tools()["compare_fit"].invoke(
             {"job_post_id": str(self.unpublished.id)}).lower())
 
+    def test_inactive_job_is_not_found(self):
+        self.assertIn("not found", self._tools()["compare_fit"].invoke(
+            {"job_post_id": str(self.inactive.id)}).lower())
+
     def test_malformed_id_returns_not_found(self):
         self.assertIn("not found",
                       self._tools()["compare_fit"].invoke({"job_post_id": "nope"}).lower())
+
+    def test_required_skill_total_is_capped(self):
+        """Same unbounded-JobPostSkillSet risk as get_job_details: the
+        Matched/Missing totals must stay bounded by MAX_JOB_SKILLS."""
+        from apps.ai.tools import MAX_JOB_SKILLS
+        from apps.jobs.models import JobPostSkillSet
+        from apps.seekers.models import SkillSet
+        for i in range(MAX_JOB_SKILLS + 5):
+            skill = SkillSet.objects.create(skill_name=f"ExtraSkill{i}")
+            JobPostSkillSet.objects.create(
+                job_post=self.job, skill_set=skill, skill_level="Advanced", is_required=True)
+        out = self._tools()["compare_fit"].invoke({"job_post_id": str(self.job.id)})
+        self.assertIn(f"of {MAX_JOB_SKILLS} listed skills", out)
