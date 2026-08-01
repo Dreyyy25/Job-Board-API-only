@@ -3,8 +3,10 @@ import base64
 import logging
 import time
 
+from django.core.exceptions import ValidationError  # malformed UUID -> 404, not 500
+
 from apps.companies.models import Company
-from apps.jobs.models import JobPostActivity
+from apps.jobs.models import JobPost, JobPostActivity
 from apps.seekers.models import SkillSet
 
 from .exceptions import (
@@ -13,11 +15,18 @@ from .exceptions import (
     AIResponseInvalidError,
     CompanyProfileMissingError,
     InvalidResumeFileError,
+    JobPostNotFoundError,
+    NoApplicantsError,
+    ScreeningPermissionError,
 )
 from .llm import get_model
-from .models import AIUsageLog
-from .prompts import build_job_post_writer_prompt, build_resume_import_messages
-from .schemas import JobPostDraft, ResumeExtract
+from .models import AIUsageLog, ScreeningReport
+from .prompts import (
+    build_job_post_writer_prompt,
+    build_resume_import_messages,
+    build_screening_prompt,
+)
+from .schemas import JobPostDraft, ResumeExtract, ScreeningResult
 
 logger = logging.getLogger('apps.ai')
 
@@ -287,3 +296,117 @@ def extract_resume(user, *, text='', file=None, model=None):
         'skills': skills,
         'new_skill_suggestions': suggestions,
     }
+
+
+def _has_newer_application(job_post, since):
+    """Staleness rule: any application newer than the report.
+
+    Deliberately a timestamp comparison, not a count — withdraw-plus-reapply
+    leaves the count unchanged and would keep serving a stale report.
+    """
+    return JobPostActivity.objects.filter(
+        job_post=job_post, application_date__gt=since).exists()
+
+
+def _screening_response(job_post, report, *, cached):
+    payload = report.report or {}
+    return {
+        'job_post_id': str(job_post.id),
+        'applicant_count': report.applicant_count,
+        'truncated': payload.get('truncated', False),
+        'excluded_count': payload.get('excluded_count', 0),
+        'generated_at': report.created_at.isoformat(),
+        'cached': cached,
+        'candidates': payload.get('candidates', []),
+    }
+
+
+def screen_applicants(user, *, job_post_id, refresh=False, model=None):
+    """Score and rank a job post's applicants, caching the run.
+
+    Returns the shape documented on the endpoint. Creates nothing but a
+    ScreeningReport and its usage log — applications are never mutated.
+    """
+    try:
+        job_post = (JobPost.objects
+                    .select_related('company')
+                    .prefetch_related('required_skills__skill_set')
+                    .get(id=job_post_id))
+    except (JobPost.DoesNotExist, ValidationError, ValueError):
+        raise JobPostNotFoundError()
+
+    if not (user.is_staff or user.is_superuser):
+        if job_post.company.user_account_id != user.id:
+            raise ScreeningPermissionError()
+
+    # Count first, cache second: an emptied pool must 409 rather than replay a
+    # report about applications that no longer exist — the one extra COUNT on
+    # the cache-hit path is the price.
+    total_applicants = JobPostActivity.objects.filter(job_post=job_post).count()
+    if total_applicants == 0:
+        raise NoApplicantsError()
+
+    latest = (ScreeningReport.objects
+              .filter(job_post=job_post).order_by('-created_at').first())
+    if latest is not None and not refresh and not _has_newer_application(
+            job_post, latest.created_at):
+        return _screening_response(job_post, latest, cached=True)
+
+    applications = _fetch_applications(job_post)
+    labels = {f"candidate_{i}": activity
+              for i, activity in enumerate(applications, start=1)}
+
+    prompt = build_screening_prompt(
+        job_title=job_post.job_title,
+        job_description=job_post.job_description,
+        required_skills=[
+            f"{s.skill_set.skill_name} ({s.skill_level}, "
+            f"{'required' if s.is_required else 'nice-to-have'})"
+            for s in job_post.required_skills.all()
+        ],
+        dossiers=[_build_dossier(label, activity)
+                  for label, activity in labels.items()],
+    )
+
+    model = model or get_model('pro')
+    usage_sink = []
+    try:
+        result = _invoke_structured(model, ScreeningResult, prompt, usage_sink)
+    finally:
+        _record_usage(AIUsageLog.Feature.SCREENING, user, model, usage_sink)
+
+    candidates, seen = [], set()
+    for item in result.candidates:
+        activity = labels.get(item.candidate_ref.strip())
+        if activity is None or activity.id in seen:
+            continue  # label the service never issued, or a duplicate
+        seen.add(activity.id)
+        candidates.append({
+            'application_id': str(activity.id),
+            'applicant_id': str(activity.user_account_id),
+            'applicant_name': _seeker_name(activity.user_account),
+            'score': max(0, min(100, item.score)),
+            'strengths': list(item.strengths),
+            'gaps': list(item.gaps),
+            'summary': item.summary,
+        })
+
+    # Deterministic ranking — no second LLM call. Name then id break ties so
+    # the same inputs always produce the same order.
+    candidates.sort(key=lambda c: (-c['score'], c['applicant_name'], c['application_id']))
+    for rank, candidate in enumerate(candidates, start=1):
+        candidate['rank'] = rank
+
+    logger.info('ai screening job_post=%s screened=%s returned=%s',
+                job_post.id, len(applications), len(candidates))
+
+    report = ScreeningReport.objects.create(
+        job_post=job_post,
+        report={
+            'candidates': candidates,
+            'truncated': total_applicants > MAX_SCREENED_APPLICANTS,
+            'excluded_count': total_applicants - len(applications),
+        },
+        applicant_count=len(applications),
+    )
+    return _screening_response(job_post, report, cached=False)

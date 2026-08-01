@@ -910,3 +910,277 @@ class DossierAssemblyTests(_ScreeningFixture, TestCase):
         self.assertLessEqual(large_queries, 10)
         # The real N+1 guard: cost must not grow with the number of applicants.
         self.assertEqual(small_queries, large_queries)
+
+
+class ScreenApplicantsServiceTests(_ScreeningFixture, TestCase):
+    def _result(self, refs_and_scores):
+        from apps.ai.schemas import CandidateAssessment, ScreeningResult
+        return ScreeningResult(candidates=[
+            CandidateAssessment(candidate_ref=ref, score=score,
+                                strengths=["s"], gaps=["g"], summary="sum")
+            for ref, score in refs_and_scores
+        ])
+
+    def _fake(self, *results):
+        from apps.ai.testing import FakeStructuredChatModel
+        return FakeStructuredChatModel(parsed_outputs=list(results))
+
+    def test_returns_ranked_candidates_and_persists_a_report(self):
+        from apps.ai.models import ScreeningReport
+        from apps.ai.services import screen_applicants
+        owner = self.make_company_user()
+        job_post = self.make_job_post(owner)
+        self.make_applicant(job_post, "low@example.com", first="Low", last="Score")
+        self.make_applicant(job_post, "high@example.com", first="High", last="Score")
+
+        out = screen_applicants(
+            owner, job_post_id=job_post.id,
+            model=self._fake(self._result([("candidate_1", 40), ("candidate_2", 95)])))
+
+        self.assertEqual(out['applicant_count'], 2)
+        self.assertFalse(out['cached'])
+        self.assertFalse(out['truncated'])
+        self.assertEqual([c['rank'] for c in out['candidates']], [1, 2])
+        self.assertEqual(out['candidates'][0]['score'], 95)
+        self.assertEqual(ScreeningReport.objects.filter(job_post=job_post).count(), 1)
+
+    def test_candidate_carries_real_application_and_applicant_ids(self):
+        from apps.ai.services import screen_applicants
+        owner = self.make_company_user()
+        job_post = self.make_job_post(owner)
+        activity = self.make_applicant(job_post, "one@example.com",
+                                       first="Solo", last="Applicant")
+        out = screen_applicants(owner, job_post_id=job_post.id,
+                                model=self._fake(self._result([("candidate_1", 70)])))
+        candidate = out['candidates'][0]
+        self.assertEqual(candidate['application_id'], str(activity.id))
+        self.assertEqual(candidate['applicant_id'], str(activity.user_account_id))
+        self.assertEqual(candidate['applicant_name'], "Solo Applicant")
+
+    def test_invented_and_duplicate_labels_are_dropped(self):
+        from apps.ai.services import screen_applicants
+        owner = self.make_company_user()
+        job_post = self.make_job_post(owner)
+        self.make_applicant(job_post, "real@example.com")
+        out = screen_applicants(
+            owner, job_post_id=job_post.id,
+            model=self._fake(self._result([
+                ("candidate_1", 80), ("candidate_1", 60), ("candidate_99", 99)])))
+        self.assertEqual(len(out['candidates']), 1)
+        self.assertEqual(out['candidates'][0]['score'], 80)
+
+    def test_scores_are_clamped_to_0_100(self):
+        from apps.ai.services import screen_applicants
+        owner = self.make_company_user()
+        job_post = self.make_job_post(owner)
+        self.make_applicant(job_post, "clamphigh@example.com", first="High", last="One")
+        self.make_applicant(job_post, "clamplow@example.com", first="Low", last="Two")
+        out = screen_applicants(
+            owner, job_post_id=job_post.id,
+            model=self._fake(self._result([("candidate_1", 250), ("candidate_2", -5)])))
+        self.assertEqual(sorted(c['score'] for c in out['candidates']), [0, 100])
+
+    def test_second_call_returns_the_cached_report_without_an_llm_call(self):
+        from apps.ai.models import ScreeningReport
+        from apps.ai.services import screen_applicants
+        owner = self.make_company_user()
+        job_post = self.make_job_post(owner)
+        self.make_applicant(job_post, "cache@example.com")
+        screen_applicants(owner, job_post_id=job_post.id,
+                          model=self._fake(self._result([("candidate_1", 77)])))
+
+        # A fake with no scripted outputs raises inside _invoke_structured, which the
+        # retry wrapper converts to AIProviderError — so this call blows up loudly if
+        # the cache path is skipped.
+        out = screen_applicants(owner, job_post_id=job_post.id, model=self._fake())
+
+        self.assertTrue(out['cached'])
+        self.assertEqual(out['candidates'][0]['score'], 77)
+        self.assertEqual(ScreeningReport.objects.filter(job_post=job_post).count(), 1)
+
+    def test_refresh_forces_a_new_run(self):
+        from apps.ai.models import ScreeningReport
+        from apps.ai.services import screen_applicants
+        owner = self.make_company_user()
+        job_post = self.make_job_post(owner)
+        self.make_applicant(job_post, "refresh@example.com")
+        screen_applicants(owner, job_post_id=job_post.id,
+                          model=self._fake(self._result([("candidate_1", 10)])))
+        out = screen_applicants(owner, job_post_id=job_post.id, refresh=True,
+                                model=self._fake(self._result([("candidate_1", 90)])))
+        self.assertFalse(out['cached'])
+        self.assertEqual(out['candidates'][0]['score'], 90)
+        self.assertEqual(ScreeningReport.objects.filter(job_post=job_post).count(), 2)
+
+    def test_a_newer_application_makes_the_report_stale(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from apps.ai.services import screen_applicants
+        owner = self.make_company_user()
+        job_post = self.make_job_post(owner)
+        self.make_applicant(job_post, "first@example.com")
+        screen_applicants(owner, job_post_id=job_post.id,
+                          model=self._fake(self._result([("candidate_1", 55)])))
+
+        self.make_applicant(job_post, "second@example.com",
+                            application_date=timezone.now() + timedelta(hours=1))
+        out = screen_applicants(
+            owner, job_post_id=job_post.id,
+            model=self._fake(self._result([("candidate_1", 60), ("candidate_2", 65)])))
+        self.assertFalse(out['cached'])
+        self.assertEqual(out['applicant_count'], 2)
+
+    def test_withdraw_then_reapply_still_invalidates(self):
+        # The staleness rule is a timestamp comparison, not a count comparison:
+        # a count check would see 1 both before and after and wrongly serve cache.
+        from datetime import timedelta
+        from django.utils import timezone
+        from apps.ai.services import screen_applicants
+        owner = self.make_company_user()
+        job_post = self.make_job_post(owner)
+        first = self.make_applicant(job_post, "churn1@example.com")
+        screen_applicants(owner, job_post_id=job_post.id,
+                          model=self._fake(self._result([("candidate_1", 30)])))
+        first.delete()
+        self.make_applicant(job_post, "churn2@example.com",
+                            application_date=timezone.now() + timedelta(hours=1))
+        out = screen_applicants(owner, job_post_id=job_post.id,
+                                model=self._fake(self._result([("candidate_1", 88)])))
+        self.assertFalse(out['cached'])
+        self.assertEqual(out['candidates'][0]['score'], 88)
+
+    def test_cap_sets_truncated_and_excluded_count(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from apps.ai.services import MAX_SCREENED_APPLICANTS, screen_applicants
+        owner = self.make_company_user()
+        job_post = self.make_job_post(owner)
+        base = timezone.now()
+        for i in range(MAX_SCREENED_APPLICANTS + 3):
+            self.make_applicant(job_post, f"cap{i}@example.com",
+                                application_date=base + timedelta(minutes=i))
+        out = screen_applicants(
+            owner, job_post_id=job_post.id,
+            model=self._fake(self._result([("candidate_1", 50)])))
+        self.assertTrue(out['truncated'])
+        self.assertEqual(out['excluded_count'], 3)
+        self.assertEqual(out['applicant_count'], MAX_SCREENED_APPLICANTS)
+
+    def test_no_applicants_raises(self):
+        from apps.ai.exceptions import NoApplicantsError
+        from apps.ai.services import screen_applicants
+        owner = self.make_company_user()
+        job_post = self.make_job_post(owner)
+        with self.assertRaises(NoApplicantsError):
+            screen_applicants(owner, job_post_id=job_post.id, model=self._fake())
+
+    def test_emptied_applicant_pool_stops_serving_the_cached_report(self):
+        from apps.ai.exceptions import NoApplicantsError
+        from apps.ai.services import screen_applicants
+        from apps.jobs.models import JobPostActivity
+        owner = self.make_company_user()
+        job_post = self.make_job_post(owner)
+        self.make_applicant(job_post, "gone@example.com")
+        screen_applicants(owner, job_post_id=job_post.id,
+                          model=self._fake(self._result([("candidate_1", 50)])))
+        JobPostActivity.objects.filter(job_post=job_post).delete()
+        with self.assertRaises(NoApplicantsError):
+            screen_applicants(owner, job_post_id=job_post.id, model=self._fake())
+
+    def test_missing_job_post_raises(self):
+        import uuid as uuid_module
+        from apps.ai.exceptions import JobPostNotFoundError
+        from apps.ai.services import screen_applicants
+        owner = self.make_company_user()
+        with self.assertRaises(JobPostNotFoundError):
+            screen_applicants(owner, job_post_id=uuid_module.uuid4(), model=self._fake())
+
+    def test_other_company_is_denied(self):
+        from apps.ai.exceptions import ScreeningPermissionError
+        from apps.ai.services import screen_applicants
+        owner = self.make_company_user()
+        intruder = self.make_company_user(email="intruder@example.com",
+                                          company_name="Other")
+        job_post = self.make_job_post(owner)
+        self.make_applicant(job_post, "app@example.com")
+        with self.assertRaises(ScreeningPermissionError):
+            screen_applicants(intruder, job_post_id=job_post.id, model=self._fake())
+
+    def test_admin_may_screen_another_companys_post(self):
+        from apps.ai.services import screen_applicants
+        owner = self.make_company_user()
+        admin = UserAccount.objects.create_user(
+            email="admin@example.com", password="Str0ng-Password!", user_type="company")
+        admin.is_staff = True
+        admin.save()
+        job_post = self.make_job_post(owner)
+        self.make_applicant(job_post, "seen@example.com")
+        out = screen_applicants(admin, job_post_id=job_post.id,
+                                model=self._fake(self._result([("candidate_1", 65)])))
+        self.assertEqual(out['candidates'][0]['score'], 65)
+
+    def test_superuser_may_screen_another_companys_post(self):
+        from apps.ai.services import screen_applicants
+        owner = self.make_company_user()
+        root = UserAccount.objects.create_user(
+            email="root2@example.com", password="Str0ng-Password!", user_type="job_seeker")
+        root.is_superuser = True
+        root.save()
+        job_post = self.make_job_post(owner)
+        self.make_applicant(job_post, "seen2@example.com")
+        out = screen_applicants(root, job_post_id=job_post.id,
+                                model=self._fake(self._result([("candidate_1", 44)])))
+        self.assertEqual(out['candidates'][0]['score'], 44)
+
+    def test_usage_row_written_for_the_llm_call(self):
+        from apps.ai.models import AIUsageLog
+        from apps.ai.services import screen_applicants
+        owner = self.make_company_user()
+        job_post = self.make_job_post(owner)
+        self.make_applicant(job_post, "usage@example.com")
+        screen_applicants(owner, job_post_id=job_post.id,
+                          model=self._fake(self._result([("candidate_1", 50)])))
+        rows = AIUsageLog.objects.filter(feature=AIUsageLog.Feature.SCREENING)
+        self.assertEqual(rows.count(), 1)
+        self.assertEqual(rows.first().input_tokens, 100)
+
+    def test_cached_path_writes_no_usage_row(self):
+        from apps.ai.models import AIUsageLog
+        from apps.ai.services import screen_applicants
+        owner = self.make_company_user()
+        job_post = self.make_job_post(owner)
+        self.make_applicant(job_post, "nousage@example.com")
+        screen_applicants(owner, job_post_id=job_post.id,
+                          model=self._fake(self._result([("candidate_1", 50)])))
+        screen_applicants(owner, job_post_id=job_post.id, model=self._fake())
+        self.assertEqual(
+            AIUsageLog.objects.filter(feature=AIUsageLog.Feature.SCREENING).count(), 1)
+
+    def test_provider_error_propagates_and_writes_no_report(self):
+        from apps.ai.exceptions import AIProviderError
+        from apps.ai.models import ScreeningReport
+        from apps.ai.services import screen_applicants
+        owner = self.make_company_user()
+        job_post = self.make_job_post(owner)
+        self.make_applicant(job_post, "boom@example.com")
+        model = self._fake(RuntimeError("provider down"), RuntimeError("provider down"))
+        with self.assertRaises(AIProviderError):
+            screen_applicants(owner, job_post_id=job_post.id, model=model)
+        self.assertEqual(ScreeningReport.objects.count(), 0)
+
+    def test_logs_no_dossier_text_and_mutates_no_application(self):
+        from apps.ai.services import screen_applicants
+        owner = self.make_company_user()
+        job_post = self.make_job_post(owner)
+        activity = self.make_applicant(
+            job_post, "quiet@example.com", first="Ada", last="Lovelace",
+            cover_letter="SECRETCOVERLETTER")
+        with self.assertLogs('apps.ai', level='INFO') as captured:
+            screen_applicants(owner, job_post_id=job_post.id,
+                              model=self._fake(self._result([("candidate_1", 50)])))
+        joined = "\n".join(captured.output)
+        self.assertNotIn("SECRETCOVERLETTER", joined)
+        self.assertNotIn("quiet@example.com", joined)
+        self.assertNotIn("Prior Corp", joined)
+        activity.refresh_from_db()
+        self.assertEqual(activity.application_status, 'pending')
