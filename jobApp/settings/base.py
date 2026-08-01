@@ -136,8 +136,6 @@ SIMPLE_JWT = {
 # Refresh-token cookie — httpOnly so JS never sees it; access token still
 # travels in the JSON response body. Scoped to the accounts path since only
 # login/register/token-refresh/logout ever need to read or clear it.
-# AUTH_REFRESH_COOKIE_SECURE is env-differing (dev/test False, prod True)
-# and is set per-settings-module below.
 AUTH_REFRESH_COOKIE = {
     "NAME": "refresh_token",
     "PATH": "/api/v1/accounts/",          # scoped: only auth endpoints ever receive it
@@ -145,6 +143,13 @@ AUTH_REFRESH_COOKIE = {
     "HTTPONLY": True,
     "MAX_AGE": int(SIMPLE_JWT["REFRESH_TOKEN_LIFETIME"].total_seconds()),  # derive, don't hardcode
 }
+
+# Env-differing (development/test override to False, production restates
+# True). Defaulted here so any settings module built on base resolves it —
+# without a base default the first auth request raises AttributeError -> 500,
+# and on token/refresh/ that strands the client. Secure-by-default: a module
+# that forgets to override gets the safe value, not the unsafe one.
+AUTH_REFRESH_COOKIE_SECURE = True
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
