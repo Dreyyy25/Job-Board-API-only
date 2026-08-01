@@ -1,6 +1,9 @@
 from django.conf import settings
 from django.contrib.auth.hashers import make_password
-from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.exceptions import (
+    ObjectDoesNotExist,
+    ValidationError as DjangoValidationError,
+)
 from drf_spectacular.utils import (
     OpenApiResponse,
     extend_schema,
@@ -14,10 +17,12 @@ from rest_framework.decorators import (
     permission_classes,
     throttle_classes,
 )
-from rest_framework.throttling import AnonRateThrottle
+from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle
 from rest_framework.parsers import JSONParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
+from rest_framework_simplejwt.views import TokenRefreshView
 
 from . import services
 from .models import UserAccount
@@ -65,6 +70,16 @@ _LoginRequestSerializer = inline_serializer(
 _ErrorSerializer = inline_serializer(
     name='ErrorResponse',
     fields={'error': drf_serializers.CharField()},
+)
+
+_RefreshResponseSerializer = inline_serializer(
+    name='TokenRefreshResponse',
+    fields={'access': drf_serializers.CharField()},
+)
+
+_RefreshErrorSerializer = inline_serializer(
+    name='TokenRefreshError',
+    fields={'detail': drf_serializers.CharField()},
 )
 
 
@@ -298,3 +313,54 @@ def logout(request):
     response = Response(status=status.HTTP_205_RESET_CONTENT)
     delete_refresh_cookie(response)
     return response
+
+
+# Token refresh endpoint
+class CookieTokenRefreshView(TokenRefreshView):
+    """Reads the refresh token from the httpOnly cookie (never the body)
+    and writes the rotated refresh token back to that same cookie.
+
+    ROTATE_REFRESH_TOKENS / BLACKLIST_AFTER_ROTATION are enabled in
+    SIMPLE_JWT, so TokenRefreshSerializer.validated_data comes back with
+    both `access` and `refresh` — we move `refresh` into the cookie and
+    keep only `access` in the response body.
+    """
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'token_refresh'
+
+    @extend_schema(
+        request=None,
+        responses={
+            200: _RefreshResponseSerializer,
+            401: _RefreshErrorSerializer,
+            429: OpenApiResponse(description='Rate limited'),
+        },
+        tags=['accounts'],
+    )
+    def post(self, request, *args, **kwargs):
+        cookie_name = settings.AUTH_REFRESH_COOKIE['NAME']
+        refresh_token = request.COOKIES.get(cookie_name)
+        if not refresh_token:
+            return Response(
+                {'detail': 'Refresh token cookie not found.'},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        serializer = self.get_serializer(data={'refresh': refresh_token})
+        try:
+            serializer.is_valid(raise_exception=True)
+        except TokenError as e:
+            raise InvalidToken(e.args[0]) from e
+        except ObjectDoesNotExist as e:
+            # simplejwt's TokenRefreshSerializer.validate looks the user up
+            # with an unguarded .get(), so a signature-valid token whose user
+            # row was deleted raises DoesNotExist — not TokenError — and DRF
+            # would render it as a 500. A vanished user is an invalid token.
+            raise InvalidToken() from e
+
+        data = dict(serializer.validated_data)
+        rotated_refresh = data.pop('refresh', None)
+        response = Response(data, status=status.HTTP_200_OK)
+        if rotated_refresh:
+            set_refresh_cookie(response, rotated_refresh)
+        return response
