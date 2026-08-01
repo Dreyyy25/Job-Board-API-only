@@ -1,5 +1,10 @@
 """Thin dispatchers: validate input, call the service, translate exceptions."""
-from drf_spectacular.utils import OpenApiParameter, extend_schema, inline_serializer
+from drf_spectacular.utils import (
+    OpenApiParameter,
+    PolymorphicProxySerializer,
+    extend_schema,
+    inline_serializer,
+)
 from rest_framework import serializers as drf_serializers
 from rest_framework import status
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
@@ -23,8 +28,25 @@ from .exceptions import (
 from .permissions import IsCompanyUser, IsCompanyUserOrAdmin, IsSeekerUser
 from .serializers import JobPostAssistRequestSerializer, ResumeImportRequestSerializer
 
+# Two error envelopes reach clients, and which one you get depends on WHERE the
+# request died:
+#   {'error': ...}  — raised by these views translating a domain exception.
+#   {'detail': ...} — raised by DRF itself, before the view body runs: the
+#                     permission class (401/403) and the throttles (429).
+# Declaring only the first would make the schema lie about every DRF-generated
+# response, so the statuses that can produce either are declared as a oneOf.
 _AIErrorSerializer = inline_serializer(
     name='AIError', fields={'error': drf_serializers.CharField()},
+)
+
+_AIDetailErrorSerializer = inline_serializer(
+    name='AIDetailError', fields={'detail': drf_serializers.CharField()},
+)
+
+_AIEitherErrorSerializer = PolymorphicProxySerializer(
+    component_name='AIErrorOrDetail',
+    serializers=[_AIErrorSerializer, _AIDetailErrorSerializer],
+    resource_type_field_name=None,
 )
 
 _SuggestedSkillSerializer = inline_serializer(
@@ -53,9 +75,9 @@ _JobPostDraftSerializer = inline_serializer(
     responses={
         200: _JobPostDraftSerializer,
         400: _AIErrorSerializer,
-        401: _AIErrorSerializer,
-        403: _AIErrorSerializer,
-        429: _AIErrorSerializer,
+        401: _AIDetailErrorSerializer,
+        403: _AIDetailErrorSerializer,
+        429: _AIEitherErrorSerializer,
         502: _AIErrorSerializer,
     },
     tags=['ai'],
@@ -140,9 +162,9 @@ _ResumeImportResponseSerializer = inline_serializer(
     responses={
         200: _ResumeImportResponseSerializer,
         400: _AIErrorSerializer,
-        401: _AIErrorSerializer,
-        403: _AIErrorSerializer,
-        429: _AIErrorSerializer,
+        401: _AIDetailErrorSerializer,
+        403: _AIDetailErrorSerializer,
+        429: _AIEitherErrorSerializer,
         502: _AIErrorSerializer,
     },
     tags=['ai'],
@@ -209,11 +231,14 @@ _ScreeningResponseSerializer = inline_serializer(
     ],
     responses={
         200: _ScreeningResponseSerializer,
-        401: _AIErrorSerializer,
-        403: _AIErrorSerializer,
+        401: _AIDetailErrorSerializer,
+        # 403 has two shapes here: the permission class rejects a non-company
+        # user with {'detail'}, while ScreeningPermissionError — a company that
+        # does not own this post — is translated below into {'error'}.
+        403: _AIEitherErrorSerializer,
         404: _AIErrorSerializer,
         409: _AIErrorSerializer,
-        429: _AIErrorSerializer,
+        429: _AIEitherErrorSerializer,
         502: _AIErrorSerializer,
     },
     tags=['ai'],

@@ -1456,3 +1456,117 @@ class ScreenApplicantsEndpointTests(_ScreeningFixture, APITestCase):
         self.assertEqual(
             views.screen_applicants.cls.throttle_classes,
             [AnonRateThrottle, UserRateThrottle, BurstRateThrottle, AIRateThrottle])
+
+
+def _schema_error_shapes(schema, path, status):
+    """Property-name sets a client may receive for one path/status.
+
+    Returns a sorted list of sorted property lists — one entry per branch of a
+    oneOf, so [['detail'], ['error']] means either envelope is possible.
+    """
+    components = schema['components']['schemas']
+
+    def resolve(node):
+        if '$ref' in node:
+            return resolve(components[node['$ref'].rsplit('/', 1)[-1]])
+        if 'oneOf' in node:
+            branches = []
+            for branch in node['oneOf']:
+                branches.extend(resolve(branch))
+            return branches
+        return [sorted(node.get('properties', {}))]
+
+    response = schema['paths'][path]['post']['responses'][str(status)]
+    return sorted(resolve(response['content']['application/json']['schema']))
+
+
+class AIErrorSchemaHonestyTests(_ScreeningFixture, APITestCase):
+    """The declared error envelope must match what clients actually receive.
+
+    DRF answers permission and throttle failures itself, before the view body
+    runs, with {'detail': ...}; the views' own translations use {'error': ...}.
+    Declaring one shape for both would hand generated clients a field that is
+    never populated.
+    """
+
+    maxDiff = None
+    ASSIST = '/api/v1/ai/job-post-assist/'
+    RESUME = '/api/v1/ai/resume-import/'
+    SCREEN = '/api/v1/ai/job-posts/{job_post_id}/screen/'
+
+    def _schema(self):
+        from drf_spectacular.generators import SchemaGenerator
+        return SchemaGenerator().get_schema(request=None, public=True)
+
+    # --- what the schema promises -------------------------------------------------
+
+    def test_401_is_declared_as_detail_on_every_ai_endpoint(self):
+        schema = self._schema()
+        for path in (self.ASSIST, self.RESUME, self.SCREEN):
+            with self.subTest(path=path):
+                self.assertEqual(
+                    _schema_error_shapes(schema, path, 401), [['detail']])
+
+    def test_403_is_declared_as_detail_where_only_the_permission_class_can_fail(self):
+        schema = self._schema()
+        for path in (self.ASSIST, self.RESUME):
+            with self.subTest(path=path):
+                self.assertEqual(
+                    _schema_error_shapes(schema, path, 403), [['detail']])
+
+    def test_screening_403_is_declared_as_either_envelope(self):
+        # Non-company user -> permission class -> {'detail'};
+        # company that does not own the post -> ScreeningPermissionError -> {'error'}.
+        self.assertEqual(
+            _schema_error_shapes(self._schema(), self.SCREEN, 403),
+            [['detail'], ['error']])
+
+    def test_429_is_declared_as_either_envelope_on_every_ai_endpoint(self):
+        # Local throttle -> {'detail'}; provider quota -> {'error'}.
+        schema = self._schema()
+        for path in (self.ASSIST, self.RESUME, self.SCREEN):
+            with self.subTest(path=path):
+                self.assertEqual(
+                    _schema_error_shapes(schema, path, 429),
+                    [['detail'], ['error']])
+
+    def test_view_translated_statuses_stay_declared_as_error(self):
+        schema = self._schema()
+        self.assertEqual(_schema_error_shapes(schema, self.ASSIST, 400), [['error']])
+        self.assertEqual(_schema_error_shapes(schema, self.SCREEN, 404), [['error']])
+        self.assertEqual(_schema_error_shapes(schema, self.SCREEN, 409), [['error']])
+        self.assertEqual(_schema_error_shapes(schema, self.SCREEN, 502), [['error']])
+
+    # --- what clients actually receive --------------------------------------------
+
+    def test_anonymous_401_body_uses_detail(self):
+        owner = self.make_company_user()
+        job_post = self.make_job_post(owner)
+        response = self.client.post(f"/api/v1/ai/job-posts/{job_post.id}/screen/")
+        self.assertEqual(response.status_code, 401)
+        self.assertIn('detail', response.data)
+        self.assertNotIn('error', response.data)
+
+    def test_wrong_user_type_403_body_uses_detail(self):
+        owner = self.make_company_user()
+        job_post = self.make_job_post(owner)
+        seeker = UserAccount.objects.create_user(
+            email="shape-seeker@example.com", password="Str0ng-Password!",
+            user_type="job_seeker")
+        _auth(self.client, seeker)
+        response = self.client.post(f"/api/v1/ai/job-posts/{job_post.id}/screen/")
+        self.assertEqual(response.status_code, 403)
+        self.assertIn('detail', response.data)
+        self.assertNotIn('error', response.data)
+
+    def test_non_owner_company_403_body_uses_error(self):
+        owner = self.make_company_user()
+        intruder = self.make_company_user(
+            email="shape-intruder@example.com", company_name="Other")
+        job_post = self.make_job_post(owner)
+        self.make_applicant(job_post, "shape-app@example.com")
+        _auth(self.client, intruder)
+        response = self.client.post(f"/api/v1/ai/job-posts/{job_post.id}/screen/")
+        self.assertEqual(response.status_code, 403)
+        self.assertIn('error', response.data)
+        self.assertNotIn('detail', response.data)

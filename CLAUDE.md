@@ -109,6 +109,13 @@ network. AI views list **four** throttle classes
 `jobApp/throttling.py`, `AIRateThrottle` lives in `apps/ai/throttling.py`).
 Every token-consuming LLM call — including failed-validation retries — writes an `AIUsageLog` row. Manual connectivity check:
 `uv run python manage.py ai_smoke` (billable — not in the test suite).
+Two error envelopes reach clients and the OpenAPI responses must say which:
+the views' own exception translations return `{'error': ...}`, while DRF
+answers permission (401/403) and throttle (429) failures itself with
+`{'detail': ...}` before the view body runs. Statuses that can produce either —
+screening's 403, every endpoint's 429 — are declared as the `AIErrorOrDetail`
+`oneOf`. `AIErrorSchemaHonestyTests` locks both the declaration and the runtime
+bodies, so the two cannot drift apart again.
 Screening uses the **Pro** tier (writer and resume import use Flash), sends at
 most 50 applicants (newest first — beyond that the response carries
 `truncated` plus `excluded_count`), and labels candidates `candidate_1..N` so
