@@ -472,23 +472,44 @@ CHAT_MAX_OUTPUT_TOKENS = 1024
 #
 # _HTML_TAG_RE is a NAME ALLOWLIST, not "any tag": stripping every `<word>`
 # corrupts ordinary text that merely looks tag-shaped — `if a<b and b>c`,
-# `List<int>`, a reply that discusses `<div>`/`<span>` — none of which can
-# fetch anything. Only tags that can initiate a request or execute code are
-# stripped; matching is by exact name (IGNORECASE) so "b" never matches the
+# `List<int>`, `std::vector<std::string>`, `const f = (a) => a<10 && a>1;`,
+# a reply that discusses `<div>`/`<span>` — none of which can fetch
+# anything. Matching is by exact name (IGNORECASE) so "b" never matches the
 # "base" alternative, etc.
+#
+# The name list alone still misses two shapes: (a) tags the list doesn't
+# happen to name — `<image>` is parsed as `img` by every HTML5 parser, and
+# `<table background=...>`/`<frame src=...>`/`<portal src=...>` are all
+# fetch-capable — and (b) EVENT HANDLERS on an otherwise inert tag, e.g.
+# `<div onmouseover="fetch(...)">`, where nothing about the tag NAME is
+# dangerous. Rather than chase an ever-growing name+attribute list, the
+# second alternative below strips ANY tag that carries an attribute
+# assignment (`<name ...=...>`), regardless of name. None of the fidelity
+# cases above have an `=` inside their angle brackets, so this leaves them
+# untouched while killing `<image src=>`, `<div onmouseover=>`,
+# `<body background=>`, `<table background=>`, etc. in one move.
 _DANGEROUS_TAG_NAMES = (
     'img', 'script', 'iframe', 'object', 'embed', 'source', 'video', 'audio',
     'link', 'a', 'form', 'input', 'svg', 'style', 'base', 'meta', 'track',
-    'picture',
+    'picture', 'image', 'body', 'frame', 'frameset', 'portal', 'button',
+    'use',
 )
 _HTML_TAG_RE = re.compile(
-    r'</?(?:' + '|'.join(_DANGEROUS_TAG_NAMES) + r')(?:\s[^<>]*)?/?>',
+    r'</?(?:' + '|'.join(_DANGEROUS_TAG_NAMES) + r')(?:\s[^<>]*)?/?>' +
+    r'|<[a-zA-Z][a-zA-Z0-9]*\s[^<>]*=[^<>]*/?>',
     re.IGNORECASE)
+# A single .sub() pass can leave a dangerous tag half-assembled:
+# "<scr<img src=x>ipt>" loses the inner <img ...> tag in one pass, which
+# reassembles "<script>" from the surviving "<scr" + "ipt>" fragments —
+# invisible to a one-shot substitution because it never re-scans its own
+# output. Bounded (real payloads converge in 2-3 passes; this stops a
+# pathological input from spinning forever).
+_MAX_TAG_STRIP_PASSES = 10
 _MD_IMAGE_RE = re.compile(r'!\[[^\]]*\]\([^)]*\)')
 _MD_LINK_RE = re.compile(r'\[([^\]]*)\]\([^)]*\)')
 # ANY scheme, not an enumerated list: `ws://`, `file://`, `blah://` are just
 # as capable of surfacing as a clickable/fetchable URI in a rendering client
-# as `https://` is. Run AFTER _HTML_TAG_RE so a scheme assembled by tag
+# as `https://` is. Run AFTER tag-stripping so a scheme assembled by tag
 # removal (`ws:<script>//host</script>` -> `ws://host`) cannot survive.
 _BARE_URL_RE = re.compile(r'\b[a-zA-Z][a-zA-Z0-9+.-]*://\S+')
 # GitHub-flavoured markdown (and most chat renderers) autolink a bare
@@ -502,8 +523,12 @@ _WWW_URL_RE = re.compile(r'\bwww\.[\w-]+(?:\.[\w-]+)+(?:[/?#]\S*)?',
 # "example.com//page" — none has a dot immediately after "//") survives.
 # No restriction on what precedes the "//": that is what lets this also
 # catch the tail of an assembled-but-broken scheme URL, e.g. "ws:<b>//host"
-# where <b> is not in the tag allowlist and so is never removed.
-_PROTOCOL_RELATIVE_URL_RE = re.compile(r'//[\w-]+(?:\.[\w-]+)+(?:[/?#]\S*)?')
+# where <b> is not in the tag allowlist and so is never removed. The path
+# group excludes the same closing delimiters as the old bare-URL matcher
+# (`)`, `]`, `>`, quotes) so a URL parenthesised or quoted in prose doesn't
+# swallow its own closing delimiter.
+_PROTOCOL_RELATIVE_URL_RE = re.compile(
+    r'//[\w-]+(?:\.[\w-]+)+(?:[/?#][^\s)\]>"\']*)?')
 # Collapses runs of spaces/tabs, but only mid-line: the lookbehind requires a
 # non-whitespace character immediately before the run, so leading indentation
 # on a line (fenced code, nested markdown lists) is never touched.
@@ -514,22 +539,37 @@ class _ChatDeadlineExceeded(Exception):
     """Internal: wall-clock bound hit between model calls."""
 
 
+def _strip_dangerous_tags(text):
+    """Apply _HTML_TAG_RE to a fixed point instead of once.
+
+    See _MAX_TAG_STRIP_PASSES above: a single pass can remove an inner tag
+    and thereby assemble an outer one that was never itself matched.
+    """
+    for _ in range(_MAX_TAG_STRIP_PASSES):
+        stripped = _HTML_TAG_RE.sub('', text)
+        if stripped == text:
+            return stripped
+        text = stripped
+    return text
+
+
 def _sanitize_reply(text):
     """Drop links/images/raw HTML, keep their visible text. See the regexes above.
 
     Order matters: entities are decoded first so a scheme cannot be smuggled
     past the URL matchers by encoding a character (e.g. `https&#58;//host`
     decodes to `https://host` before any matcher runs). Dangerous raw HTML
-    tags are then stripped as whole units — `<img src="...">` or
-    `<a href="...">text</a>` — so a URL hidden in an attribute never leaks
-    even though `text` survives, and so a scheme split across a stripped tag
-    (`ws:<script>//host</script>`) is fully assembled BEFORE the URL
+    tags are then stripped to a fixed point as whole units — `<img
+    src="...">` or `<a href="...">text</a>` — so a URL hidden in an
+    attribute never leaks even though `text` survives, and so a tag or
+    scheme split across a stripped tag (`ws:<script>//host</script>`,
+    `<scr<img src=x>ipt>`) is fully assembled and re-caught BEFORE the URL
     matchers run, rather than surviving as an unrecognisable fragment. The
     markdown, scheme, www, and protocol-relative URL matchers then handle
     whatever is left in plain markdown or prose form.
     """
     text = html.unescape(text)
-    text = _HTML_TAG_RE.sub('', text)
+    text = _strip_dangerous_tags(text)
     text = _MD_IMAGE_RE.sub('', text)
     text = _MD_LINK_RE.sub(r'\1', text)
     text = _BARE_URL_RE.sub('', text)

