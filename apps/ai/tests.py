@@ -1978,3 +1978,90 @@ class CompareFitToolTests(_ChatToolFixture, TestCase):
                 job_post=self.job, skill_set=skill, skill_level="Advanced", is_required=True)
         out = self._tools()["compare_fit"].invoke({"job_post_id": str(self.job.id)})
         self.assertIn(f"of {MAX_JOB_SKILLS} listed skills", out)
+
+
+class ChatPromptTests(TestCase):
+    def test_system_prompt_states_the_role(self):
+        from apps.ai.prompts import CHAT_SYSTEM
+        self.assertIn("job", CHAT_SYSTEM.lower())
+
+    def test_system_prompt_carries_a_prompt_injection_guard(self):
+        """Job descriptions are company-authored untrusted text."""
+        from apps.ai.prompts import CHAT_SYSTEM
+        lowered = CHAT_SYSTEM.lower()
+        self.assertIn("instruction", lowered)
+        self.assertIn("job post", lowered)
+
+    def test_system_prompt_forbids_promising_to_apply(self):
+        from apps.ai.prompts import CHAT_SYSTEM
+        self.assertIn("apply", CHAT_SYSTEM.lower())
+
+
+class GetModelOptionTests(TestCase):
+    def test_default_timeout_unchanged(self):
+        """Not a RED test — llm.py already hardcodes 30. It guards the default
+        while the signature grows new keyword arguments."""
+        from apps.ai.llm import get_model
+        self.assertEqual(get_model('flash').timeout, 30)
+
+    def test_timeout_is_overridable_for_the_agent_loop(self):
+        from apps.ai.llm import get_model
+        self.assertEqual(get_model('pro', timeout=60).timeout, 60)
+
+    def test_output_token_cap_is_overridable(self):
+        """The spec's fourth bound: one runaway completion is unbounded spend."""
+        from apps.ai.llm import get_model
+        self.assertEqual(get_model('pro', max_output_tokens=1024).max_output_tokens, 1024)
+
+
+class ScriptedFakeChatModelTests(TestCase):
+    def test_supports_bind_tools_unlike_the_structured_fake(self):
+        from apps.ai.testing import ScriptedFakeChatModel
+        model = ScriptedFakeChatModel(responses=[])
+        self.assertIs(model.bind_tools([]), model)
+
+    def test_pops_one_response_per_call(self):
+        from langchain_core.messages import AIMessage
+        from apps.ai.testing import ScriptedFakeChatModel
+        model = ScriptedFakeChatModel(
+            responses=[AIMessage(content="one"), AIMessage(content="two")])
+        self.assertEqual(model.invoke("x").content, "one")
+        self.assertEqual(model.invoke("x").content, "two")
+
+    def test_scripted_exception_is_raised(self):
+        from apps.ai.testing import ScriptedFakeChatModel
+        model = ScriptedFakeChatModel(responses=[RuntimeError("provider down")])
+        with self.assertRaises(RuntimeError):
+            model.invoke("x")
+
+    def test_drives_a_real_create_agent_loop_offline(self):
+        """The whole point: a tool call and a final answer, with no network."""
+        from langchain.agents import create_agent
+        from langchain_core.messages import AIMessage
+        from langchain_core.tools import tool
+        from langgraph.checkpoint.memory import InMemorySaver
+        from apps.ai.testing import ScriptedFakeChatModel
+
+        @tool
+        def echo(text: str) -> str:
+            """Echo the text back."""
+            return f"echoed {text}"
+
+        model = ScriptedFakeChatModel(responses=[
+            AIMessage(content="", tool_calls=[
+                {"name": "echo", "args": {"text": "hi"}, "id": "c1"}]),
+            AIMessage(content="I echoed it."),
+        ])
+        agent = create_agent(model, tools=[echo], checkpointer=InMemorySaver())
+        out = agent.invoke({"messages": [("user", "go")]},
+                           config={"configurable": {"thread_id": "t1"}})
+        self.assertEqual(out["messages"][-1].content, "I echoed it.")
+        self.assertIn("echoed hi", [m.content for m in out["messages"]])
+
+    def test_reports_usage_metadata_for_billing(self):
+        from langchain_core.messages import AIMessage
+        from apps.ai.testing import ScriptedFakeChatModel
+        model = ScriptedFakeChatModel(responses=[
+            AIMessage(content="hi", usage_metadata={
+                "input_tokens": 11, "output_tokens": 3, "total_tokens": 14})])
+        self.assertEqual(model.invoke("x").usage_metadata["input_tokens"], 11)

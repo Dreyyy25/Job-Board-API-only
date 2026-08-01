@@ -7,9 +7,11 @@ Never imported by production code.
 """
 from typing import Any
 
+from langchain_core.language_models import BaseChatModel
 from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
 from langchain_core.messages import AIMessage
-from langchain_core.runnables import RunnableLambda
+from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.runnables import Runnable, RunnableLambda
 
 
 class FakeStructuredChatModel(GenericFakeChatModel):
@@ -39,3 +41,36 @@ class FakeStructuredChatModel(GenericFakeChatModel):
                 return {"raw": raw, "parsed": item, "parsing_error": error}
             return item
         return RunnableLambda(_call)
+
+
+class ScriptedFakeChatModel(BaseChatModel):
+    """Drives a real create_agent loop offline.
+
+    FakeStructuredChatModel cannot: BaseChatModel.bind_tools raises
+    NotImplementedError and GenericFakeChatModel does not override it, so an
+    agent built on it dies the moment it binds its tools.
+
+    `responses` is consumed one entry per model call. An entry that is an
+    Exception is raised instead — script provider failures that way. Entries
+    carrying tool_calls drive the agent round the loop.
+    """
+    responses: list[Any] = []
+    model: str = "fake-pro"
+
+    @property
+    def _llm_type(self) -> str:
+        return "scripted-fake"
+
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs) -> ChatResult:
+        if not self.responses:
+            raise AssertionError(
+                "ScriptedFakeChatModel ran out of scripted responses — the agent "
+                "made more model calls than the test expected.")
+        item = self.responses.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return ChatResult(generations=[ChatGeneration(message=item)])
+
+    def bind_tools(self, tools, **kwargs) -> Runnable:
+        # Scripted responses already carry their tool_calls; nothing to bind.
+        return self
