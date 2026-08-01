@@ -32,3 +32,27 @@ class JobPostNotFoundError(Exception):
 
 class ScreeningPermissionError(Exception):
     """Requester neither owns the job post nor is an admin → HTTP 403."""
+
+
+class ConversationNotFoundError(Exception):
+    """Chat thread missing, malformed, or not owned by the requester → HTTP 404.
+
+    Not-owned deliberately returns 404 rather than 403: a 403 would confirm
+    that someone else's conversation id exists.
+    """
+
+
+class AgentLimitExceededError(Exception):
+    """Chat agent hit its per-turn call bound or wall-clock deadline → HTTP 504.
+
+    Retryable: the NEXT turn on this thread may well succeed.
+    """
+
+
+class ConversationExhaustedError(Exception):
+    """Conversation reached its lifetime model-call ceiling → HTTP 409.
+
+    Distinct from AgentLimitExceededError because it is NOT retryable: the
+    thread-limit counter is checkpointed, so every future turn on this thread
+    raises too. The user must start a new conversation.
+    """

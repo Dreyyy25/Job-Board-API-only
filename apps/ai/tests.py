@@ -1,8 +1,10 @@
+from datetime import timedelta
 from typing import Any
 from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
+from django.utils import timezone
 from langchain_core.runnables import RunnableLambda
 from rest_framework.test import APITestCase
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -1570,3 +1572,56 @@ class AIErrorSchemaHonestyTests(_ScreeningFixture, APITestCase):
         self.assertEqual(response.status_code, 403)
         self.assertIn('error', response.data)
         self.assertNotIn('detail', response.data)
+
+
+class ConversationModelTests(TestCase):
+    def _seeker(self, email="conv@example.com"):
+        return UserAccount.objects.create_user(
+            email=email, password="Str0ng-Password!", user_type="job_seeker")
+
+    def test_creates_row_with_uuid_pk_and_title(self):
+        from apps.ai.models import Conversation
+        row = Conversation.objects.create(user=self._seeker(), title="Find me python jobs")
+        self.assertIsNotNone(row.id)
+        self.assertEqual(row.title, "Find me python jobs")
+        self.assertIsNotNone(row.created_at)
+
+    def test_title_max_length_is_60(self):
+        from apps.ai.models import Conversation
+        self.assertEqual(Conversation._meta.get_field("title").max_length, 60)
+
+    def test_ordering_is_newest_first(self):
+        from apps.ai.models import Conversation
+        user = self._seeker()
+        old = Conversation.objects.create(
+            user=user, title="old", created_at=timezone.now() - timedelta(hours=1))
+        new = Conversation.objects.create(user=user, title="new")
+        self.assertEqual([c.id for c in Conversation.objects.all()], [new.id, old.id])
+
+    def test_deleting_user_deletes_conversations(self):
+        """Personal content, not a billing record: CASCADE, not SET_NULL."""
+        from apps.ai.models import Conversation
+        user = self._seeker()
+        Conversation.objects.create(user=user, title="mine")
+        user.delete()
+        self.assertEqual(Conversation.objects.count(), 0)
+
+    def test_related_name_is_ai_conversations(self):
+        from apps.ai.models import Conversation
+        user = self._seeker()
+        Conversation.objects.create(user=user, title="mine")
+        self.assertEqual(user.ai_conversations.count(), 1)
+
+
+class ChatExceptionTests(TestCase):
+    def test_conversation_not_found_error_exists(self):
+        from apps.ai.exceptions import ConversationNotFoundError
+        self.assertTrue(issubclass(ConversationNotFoundError, Exception))
+
+    def test_agent_limit_exceeded_error_exists(self):
+        from apps.ai.exceptions import AgentLimitExceededError
+        self.assertTrue(issubclass(AgentLimitExceededError, Exception))
+
+    def test_conversation_exhausted_error_exists(self):
+        from apps.ai.exceptions import ConversationExhaustedError
+        self.assertTrue(issubclass(ConversationExhaustedError, Exception))

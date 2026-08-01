@@ -66,3 +66,33 @@ class ScreeningReport(models.Model):
             models.Index(fields=['job_post', '-created_at'],
                          name='screening_job_created_idx'),
         ]
+
+
+class Conversation(models.Model):
+    """One chat thread. Owns the id that keys the LangGraph checkpointer.
+
+    The messages themselves live in the checkpointer, not here — this row
+    exists so conversations can be listed and, above all, so ownership can be
+    enforced before any thread is replayed. Deleting this row does NOT by
+    itself delete the messages; apps/ai/signals.py handles that.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    # CASCADE, unlike AIUsageLog.user's SET_NULL: a conversation is personal
+    # content that must die with the account, not a billing record that must
+    # outlive it.
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name='ai_conversations',
+    )
+    title = models.CharField(max_length=60)
+    created_at = models.DateTimeField(default=timezone.now)
+
+    def __str__(self):
+        return f"conversation {self.id} {self.title[:30]}"
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['user', '-created_at'], name='aiconv_user_created_idx'),
+        ]
