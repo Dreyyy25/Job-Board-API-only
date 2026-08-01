@@ -2092,14 +2092,46 @@ uv run python manage.py test apps.ai.tests.ListConversationsTests apps.ai.tests.
 
 Expected: PASS (15 tests).
 
-Note: `_rollback_new_conversation` in Task 5 calls `checkpointer.delete_thread(...)` and then `conversation.delete()`, which now fires the receiver and deletes the thread a second time. `delete_thread` is idempotent, so this is harmless — but the rollback must keep passing its checkpointer, which it does via the same `_checkpointer` attribute. Add that one line to `_rollback_new_conversation` if the rollback tests regress:
+- [ ] **Step 7: Adapt `_rollback_new_conversation` to the new signal**
+
+This step is **required**, not conditional. Task 5's rollback ends in
+`conversation.delete()`, which now fires the receiver added in Step 3. Left
+unchanged, that receiver would find no `_checkpointer` attribute and fall back
+to the real `get_checkpointer()` — opening a live Postgres pool inside the test
+suite — and a raise from it would abort the row delete and mask the provider
+error that triggered the rollback in the first place.
+
+Replace `_rollback_new_conversation` in `apps/ai/services.py` with:
 
 ```python
+def _rollback_new_conversation(conversation, checkpointer, created_now):
+    """Drop a conversation that was created for this call and never answered.
+
+    Without this, a client retrying a failing request accumulates one empty
+    conversation per attempt. An existing conversation is never touched.
+
+    The pre_delete receiver does the thread purge, so hand it the injected
+    checkpointer. Failures are swallowed: this runs on an error path and must
+    never replace the original provider error with a bookkeeping one.
+    """
+    if not created_now:
+        return
     conversation._checkpointer = checkpointer
-    conversation.delete()
+    try:
+        conversation.delete()
+    except Exception:  # pragma: no cover - must not mask the original failure
+        logger.warning('ai chat rollback failed conversation=%s', conversation.id)
 ```
 
-- [ ] **Step 7: Run the full suite and commit**
+Re-run the Task 5 rollback tests to confirm they still pass:
+
+```bash
+uv run python manage.py test apps.ai.tests.SendChatMessageTests
+```
+
+Expected: PASS (27 tests).
+
+- [ ] **Step 8: Run the full suite and commit**
 
 ```bash
 uv run python manage.py test
