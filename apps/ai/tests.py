@@ -2503,7 +2503,17 @@ class SanitizeReplyTests(TestCase):
     implementation only stripped markdown images/links and http(s)/ftp/data
     bare URLs — raw HTML tags, entity-encoded schemes, protocol-relative
     URLs, and reference-style link targets all survived it and could still
-    exfiltrate a seeker's data to a job description's author."""
+    exfiltrate a seeker's data to a job description's author.
+
+    Second fix-round pass: the FIRST fix over-corrected. A blanket
+    `</?[a-zA-Z]...>` tag matcher mangled ordinary text (`a<b and b>c`,
+    `List<int>`, prose discussing `<div>`/`<span>`), an enumerated scheme
+    list (`https?|ftp|data`) left every other scheme (`ws://`, `file://`)
+    completely unfiltered, and an unqualified `//...` matcher ate ordinary
+    double-slash prose (`2024//2025`). This class now also pins the fidelity
+    and prose cases the second pass fixed, alongside the vectors it closed
+    (`www.` autolinks, non-enumerated schemes, and a scheme assembled from a
+    tag that is deliberately NOT on the dangerous-tag allowlist)."""
 
     def _clean(self, text):
         from apps.ai.services import _sanitize_reply
@@ -2532,6 +2542,30 @@ class SanitizeReplyTests(TestCase):
         self.assertNotIn("attacker.example", out)
         self.assertIn("hi", out)
 
+    # --- vectors that survived the FIRST fix-round pass -----------------------
+
+    def test_strips_www_prefixed_url_with_no_scheme(self):
+        """GitHub-flavoured markdown (and most chat renderers) autolink a
+        bare www.host.tld even with no scheme and no leading slashes."""
+        out = self._clean(
+            "Check out www.attacker.example/p?d=Ada for more")
+        self.assertNotIn("attacker.example", out)
+
+    def test_strips_non_enumerated_scheme_url(self):
+        """ws:// is not http(s)/ftp/data, but a rendering client can still
+        act on it — an enumerated scheme list is a hole, not a filter."""
+        out = self._clean("Connect to ws://attacker.example/p now")
+        self.assertNotIn("attacker.example", out)
+
+    def test_strips_url_assembled_from_a_non_dangerous_tag(self):
+        """<b> is deliberately NOT on the dangerous-tag allowlist (it cannot
+        fetch anything by itself), so it is never stripped — this proves the
+        protocol-relative matcher still catches the //host tail regardless
+        of what precedes it, rather than relying on tag-stripping to
+        (incorrectly) assemble and then miss a recognisable scheme."""
+        out = self._clean("Connect to ws:<b>//attacker.example/p now")
+        self.assertNotIn("attacker.example", out)
+
     # --- regression: behaviour that must still hold ---------------------------
 
     def test_still_strips_markdown_image(self):
@@ -2555,3 +2589,35 @@ class SanitizeReplyTests(TestCase):
         out = self._clean(text)
         self.assertIn("    def foo():", out)
         self.assertIn("        return 1", out)
+
+    # --- fidelity: ordinary text must survive intact ---------------------------
+
+    def test_angle_bracket_comparison_survives_intact(self):
+        text = "if a<b and b>c: pass"
+        self.assertEqual(self._clean(text), text)
+
+    def test_generic_type_syntax_survives_intact(self):
+        text = "List<int> x; Map<String, Integer> y;"
+        self.assertEqual(self._clean(text), text)
+
+    def test_prose_discussing_html_tags_survives_intact(self):
+        text = "Use the <div> element and <span> inline."
+        self.assertEqual(self._clean(text), text)
+
+    # --- prose that merely contains "//" must survive intact -------------------
+
+    def test_year_range_with_double_slash_survives_intact(self):
+        text = "Available 2024//2025"
+        self.assertEqual(self._clean(text), text)
+
+    def test_and_or_with_double_slash_survives_intact(self):
+        text = "and//or both work"
+        self.assertEqual(self._clean(text), text)
+
+    def test_unix_path_with_double_slash_survives_intact(self):
+        text = "Binaries live in /usr//local/bin"
+        self.assertEqual(self._clean(text), text)
+
+    def test_bare_domain_with_double_slash_page_survives_intact(self):
+        text = "See example.com//page for the changelog"
+        self.assertEqual(self._clean(text), text)
