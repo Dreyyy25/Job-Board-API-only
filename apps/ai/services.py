@@ -625,6 +625,34 @@ def _sanitize_reply(text):
     matchers run, rather than surviving as an unrecognisable fragment. The
     markdown, scheme, www, and protocol-relative URL matchers then handle
     whatever is left in plain markdown or prose form.
+
+    Then it ESCAPES, and that final step — not the stripping — is what makes
+    the control sound. Four rounds of review each found another tag shape the
+    matchers had to learn (`<image>`, `<div onmouseover=>`, `<scr<img>ipt>`,
+    `<img/src=>`, `<div style\n=>`, `<my-el onclick=>`, `<div
+    onclick="if(a<b)...">`): a regex will always trail a real HTML5 tokenizer,
+    so "enumerate every dangerous shape" is not a control that can be
+    finished. `html.escape(..., quote=False)` ends the arms race by principle
+    instead of by enumeration — whatever markup survives every matcher above
+    reaches the client as `&lt;...&gt;`, i.e. as inert text that cannot fetch,
+    navigate, or execute no matter what shape it has.
+
+    The stripping stays in front of it for FIDELITY, not for safety: removing
+    attacker markup outright reads better than showing the user a literal
+    `<div onmouseover="fetch(...)">`. Escaping must run LAST — the URL
+    matchers' delimiter classes are written against raw `>` and `"`.
+
+    Contract note (user-approved): ordinary angle brackets in a reply now
+    arrive as entities, so `a<b and b>c` becomes `a&lt;b and b&gt;c`. In a
+    markdown/HTML client that RENDERS as `a<b and b>c` — strictly better than
+    today, where `<b ...>` is parsed as a live (if inert) bold tag and the
+    rest of the line renders bold. A plain-text client shows the entity
+    literally, but a plain-text client was never at risk from raw HTML, so the
+    cost lands exactly where the control never mattered.
+
+    Escaping last also makes the whole function IDEMPOTENT: the leading
+    `html.unescape` undoes the trailing escape, so a reply that is sanitized
+    twice equals one sanitized once.
     """
     text = html.unescape(text)
     text = _strip_dangerous_tags(text)
@@ -633,7 +661,11 @@ def _sanitize_reply(text):
     text = _BARE_URL_RE.sub('', text)
     text = _WWW_URL_RE.sub('', text)
     text = _PROTOCOL_RELATIVE_URL_RE.sub('', text)
-    return _MULTI_SPACE_RE.sub(' ', text).strip()
+    text = _MULTI_SPACE_RE.sub(' ', text).strip()
+    # quote=False: "'" and '"' are not markup outside an attribute value, and
+    # nothing downstream of here builds an attribute — escaping them would
+    # only mangle ordinary prose ("Ada's CV") for no gain.
+    return html.escape(text, quote=False)
 
 
 def _turn_usage(messages):

