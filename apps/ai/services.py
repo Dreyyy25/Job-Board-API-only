@@ -906,6 +906,43 @@ def list_conversations(user):
     ]
 
 
+def get_conversation_messages(user, *, conversation_id, checkpointer=None):
+    """One conversation's transcript.
+
+    History lives only in the checkpointer, so without this the listing
+    endpoint cannot serve its purpose — a client could list threads and post
+    to them but never render what was already said.
+
+    Tool calls and tool results are omitted: a transcript is what the two
+    participants said, not the machinery in between. Assistant text is passed
+    through the same sanitizer as a live reply so a stored message cannot
+    exfiltrate on replay either.
+    """
+    try:
+        conversation = Conversation.objects.get(id=conversation_id, user=user)
+    except (Conversation.DoesNotExist, ValidationError, ValueError, TypeError):
+        raise ConversationNotFoundError()
+
+    checkpointer = checkpointer or get_checkpointer()
+    config = {'configurable': {'thread_id': str(conversation.id)}}
+
+    messages = []
+    for message in _stored_messages(checkpointer, config):
+        if isinstance(message, HumanMessage):
+            messages.append({'role': 'user', 'content': message.text})
+        elif isinstance(message, AIMessage) and not message.tool_calls:
+            text = _sanitize_reply(message.text)
+            if text:
+                messages.append({'role': 'assistant', 'content': text})
+
+    return {
+        'id': str(conversation.id),
+        'title': conversation.title,
+        'created_at': conversation.created_at.isoformat(),
+        'messages': messages,
+    }
+
+
 def delete_conversation(user, *, conversation_id, checkpointer=None):
     """Delete a conversation and its stored messages.
 
