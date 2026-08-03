@@ -3316,3 +3316,226 @@ class GetConversationMessagesTests(_ChatServiceFixture, TestCase):
             self.seeker, conversation_id=str(conversation.id),
             checkpointer=self._saver())
         self.assertEqual(out["messages"], [])
+
+
+class ChatEndpointTests(_ChatServiceFixture, APITestCase):
+    URL = "/api/v1/ai/chat/"
+
+    def _post(self, payload, patched_return=None, side_effect=None):
+        _auth(self.client, self.seeker)
+        with patch("apps.ai.views.services.send_chat_message") as send:
+            if side_effect is not None:
+                send.side_effect = side_effect
+            else:
+                send.return_value = patched_return or {
+                    "conversation_id": "11111111-1111-1111-1111-111111111111",
+                    "reply": "hello"}
+            return self.client.post(self.URL, payload, format="json"), send
+
+    def test_returns_conversation_id_and_reply(self):
+        response, _ = self._post({"message": "hi"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(set(response.data), {"conversation_id", "reply"})
+
+    def test_passes_conversation_id_through(self):
+        cid = "22222222-2222-2222-2222-222222222222"
+        _, send = self._post({"message": "hi", "conversation_id": cid})
+        self.assertEqual(send.call_args.kwargs["conversation_id"], cid)
+
+    def test_missing_message_is_400(self):
+        _auth(self.client, self.seeker)
+        self.assertEqual(self.client.post(self.URL, {}, format="json").status_code, 400)
+
+    def test_blank_message_is_400(self):
+        _auth(self.client, self.seeker)
+        self.assertEqual(self.client.post(
+            self.URL, {"message": "   "}, format="json").status_code, 400)
+
+    def test_anonymous_is_401(self):
+        self.assertEqual(self.client.post(
+            self.URL, {"message": "hi"}, format="json").status_code, 401)
+
+    def test_company_user_is_403(self):
+        _auth(self.client, self.company_user)
+        self.assertEqual(self.client.post(
+            self.URL, {"message": "hi"}, format="json").status_code, 403)
+
+    def test_conversation_not_found_is_404(self):
+        from apps.ai.exceptions import ConversationNotFoundError
+        response, _ = self._post({"message": "hi"},
+                                 side_effect=ConversationNotFoundError)
+        self.assertEqual(response.status_code, 404)
+        self.assertIn("error", response.data)
+
+    def test_agent_limit_is_504(self):
+        from apps.ai.exceptions import AgentLimitExceededError
+        response, _ = self._post({"message": "hi"},
+                                 side_effect=AgentLimitExceededError)
+        self.assertEqual(response.status_code, 504)
+        self.assertIn("error", response.data)
+
+    def test_conversation_exhausted_is_409_and_says_start_a_new_one(self):
+        """Distinct from the 504: this thread can never answer again, so
+        'try a simpler question' would be false and unactionable."""
+        from apps.ai.exceptions import ConversationExhaustedError
+        response, _ = self._post({"message": "hi"},
+                                 side_effect=ConversationExhaustedError)
+        self.assertEqual(response.status_code, 409)
+        self.assertIn("new", response.data["error"].lower())
+
+    def test_provider_error_is_502(self):
+        from apps.ai.exceptions import AIProviderError
+        response, _ = self._post({"message": "hi"}, side_effect=AIProviderError)
+        self.assertEqual(response.status_code, 502)
+
+    def test_quota_error_is_429(self):
+        from apps.ai.exceptions import AIQuotaExceededError
+        response, _ = self._post({"message": "hi"}, side_effect=AIQuotaExceededError)
+        self.assertEqual(response.status_code, 429)
+        self.assertIn("error", response.data)
+
+    def test_lists_all_four_throttle_classes(self):
+        """Overriding throttle_classes REPLACES the defaults. Test settings
+        raise every rate to 100000/day, so only this assertion can catch a
+        dropped class."""
+        from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
+        from jobApp.throttling import BurstRateThrottle
+        from apps.ai.throttling import AIChatRateThrottle
+        from apps.ai import views
+        self.assertEqual(
+            list(views.chat.cls.throttle_classes),
+            [AnonRateThrottle, UserRateThrottle, BurstRateThrottle, AIChatRateThrottle])
+
+    def test_chat_throttle_uses_the_ai_chat_scope(self):
+        from apps.ai.throttling import AIChatRateThrottle
+        self.assertEqual(AIChatRateThrottle.scope, "ai-chat")
+
+
+class ChatConversationsEndpointTests(_ChatServiceFixture, APITestCase):
+    URL = "/api/v1/ai/chat/conversations/"
+
+    def _conversation(self):
+        from apps.ai.models import Conversation
+        return Conversation.objects.create(user=self.seeker, title="mine")
+
+    def test_lists_own_conversations(self):
+        self._conversation()
+        _auth(self.client, self.seeker)
+        response = self.client.get(self.URL)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(set(response.data[0]), {"id", "title", "created_at"})
+
+    def test_never_lists_another_users_conversations(self):
+        from apps.ai.models import Conversation
+        other = UserAccount.objects.create_user(
+            email="other3@example.com", password="Str0ng-Password!",
+            user_type="job_seeker")
+        Conversation.objects.create(user=other, title="theirs")
+        _auth(self.client, self.seeker)
+        self.assertEqual(self.client.get(self.URL).data, [])
+
+    def test_list_anonymous_is_401(self):
+        self.assertEqual(self.client.get(self.URL).status_code, 401)
+
+    def test_list_company_user_is_403(self):
+        _auth(self.client, self.company_user)
+        self.assertEqual(self.client.get(self.URL).status_code, 403)
+
+    def test_delete_returns_204_and_passes_the_conversation_id(self):
+        """The service is mocked here — end-to-end deletion (row + checkpointer
+        thread) is covered by DeleteConversationTests, where an InMemorySaver
+        can be injected."""
+        conversation = self._conversation()
+        _auth(self.client, self.seeker)
+        with patch("apps.ai.views.services.delete_conversation") as delete:
+            response = self.client.delete(f"{self.URL}{conversation.id}/")
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(delete.call_args.kwargs["conversation_id"],
+                         str(conversation.id))
+
+    def test_delete_unknown_is_404(self):
+        from apps.ai.exceptions import ConversationNotFoundError
+        _auth(self.client, self.seeker)
+        with patch("apps.ai.views.services.delete_conversation",
+                   side_effect=ConversationNotFoundError):
+            response = self.client.delete(
+                f"{self.URL}00000000-0000-0000-0000-000000000000/")
+        self.assertEqual(response.status_code, 404)
+        self.assertIn("error", response.data)
+
+    def test_delete_anonymous_is_401(self):
+        self.assertEqual(self.client.delete(
+            f"{self.URL}00000000-0000-0000-0000-000000000000/").status_code, 401)
+
+    def test_delete_company_user_is_403(self):
+        _auth(self.client, self.company_user)
+        self.assertEqual(self.client.delete(
+            f"{self.URL}00000000-0000-0000-0000-000000000000/").status_code, 403)
+
+    def test_transcript_returns_the_messages(self):
+        conversation = self._conversation()
+        _auth(self.client, self.seeker)
+        payload = {"id": str(conversation.id), "title": "mine",
+                   "created_at": "2026-08-01T00:00:00+00:00",
+                   "messages": [{"role": "user", "content": "hi"}]}
+        with patch("apps.ai.views.services.get_conversation_messages",
+                   return_value=payload):
+            response = self.client.get(f"{self.URL}{conversation.id}/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["messages"][0]["role"], "user")
+
+    def test_transcript_unknown_is_404(self):
+        from apps.ai.exceptions import ConversationNotFoundError
+        _auth(self.client, self.seeker)
+        with patch("apps.ai.views.services.get_conversation_messages",
+                   side_effect=ConversationNotFoundError):
+            response = self.client.get(
+                f"{self.URL}00000000-0000-0000-0000-000000000000/")
+        self.assertEqual(response.status_code, 404)
+
+    def test_transcript_anonymous_is_401(self):
+        self.assertEqual(self.client.get(
+            f"{self.URL}00000000-0000-0000-0000-000000000000/").status_code, 401)
+
+    def test_transcript_company_user_is_403(self):
+        _auth(self.client, self.company_user)
+        self.assertEqual(self.client.get(
+            f"{self.URL}00000000-0000-0000-0000-000000000000/").status_code, 403)
+
+    def test_management_endpoints_use_the_house_throttle_trio(self):
+        """These consume no tokens, so the four-class AI rule does not apply."""
+        from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
+        from jobApp.throttling import BurstRateThrottle
+        from apps.ai import views
+        expected = [AnonRateThrottle, UserRateThrottle, BurstRateThrottle]
+        self.assertEqual(list(views.list_conversations.cls.throttle_classes), expected)
+        self.assertEqual(list(views.conversation_detail.cls.throttle_classes), expected)
+
+
+class ChatSchemaTests(_ChatServiceFixture, APITestCase):
+    PATH = "/api/v1/ai/chat/"
+
+    def _schema(self):
+        from drf_spectacular.generators import SchemaGenerator
+        return SchemaGenerator().get_schema(request=None, public=True)
+
+    def test_declares_its_error_envelopes_honestly(self):
+        schema = self._schema()
+        for status_code, expected in ((401, [["detail"]]), (403, [["detail"]]),
+                                      (404, [["error"]]), (409, [["error"]]),
+                                      (504, [["error"]])):
+            with self.subTest(status=status_code):
+                self.assertEqual(
+                    _schema_error_shapes(schema, self.PATH, status_code), expected)
+
+    def test_429_declares_both_shapes(self):
+        self.assertEqual(_schema_error_shapes(self._schema(), self.PATH, 429),
+                         [["detail"], ["error"]])
+
+    def test_200_declares_the_reply_contract(self):
+        schema = self._schema()
+        body = schema["paths"][self.PATH]["post"]["responses"]["200"]
+        ref = body["content"]["application/json"]["schema"]["$ref"].rsplit("/", 1)[-1]
+        self.assertEqual(sorted(schema["components"]["schemas"][ref]["properties"]),
+                         ["conversation_id", "reply"])

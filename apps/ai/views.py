@@ -14,19 +14,26 @@ from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
 from jobApp.throttling import BurstRateThrottle
 
 from . import services
-from .throttling import AIRateThrottle
 from .exceptions import (
+    AgentLimitExceededError,
     AIProviderError,
     AIQuotaExceededError,
     AIResponseInvalidError,
     CompanyProfileMissingError,
+    ConversationExhaustedError,
+    ConversationNotFoundError,
     InvalidResumeFileError,
     JobPostNotFoundError,
     NoApplicantsError,
     ScreeningPermissionError,
 )
 from .permissions import IsCompanyUser, IsCompanyUserOrAdmin, IsSeekerUser
-from .serializers import JobPostAssistRequestSerializer, ResumeImportRequestSerializer
+from .serializers import (
+    ChatRequestSerializer,
+    JobPostAssistRequestSerializer,
+    ResumeImportRequestSerializer,
+)
+from .throttling import AIChatRateThrottle, AIRateThrottle
 
 # Two error envelopes reach clients, and which one you get depends on WHERE the
 # request died:
@@ -268,3 +275,149 @@ def screen_applicants(request, job_post_id):
         return Response({'error': 'AI provider unavailable — try again later'},
                         status=status.HTTP_502_BAD_GATEWAY)
     return Response(report)
+
+
+# The reply (and every stored transcript message) is HTML-escaped by
+# _sanitize_reply — html.escape(text, quote=False) — so `<`, `>`, and `&`
+# arrive as `&lt;`, `&gt;`, `&amp;` entities. Markdown/HTML clients can render
+# the string directly (the entities display as the literal characters);
+# plain-text clients must entity-decode it exactly once before display.
+_REPLY_HELP_TEXT = (
+    "HTML-escaped (&lt;/&gt;/&amp; entities). Markdown/HTML clients can "
+    "render this directly; plain-text clients must entity-decode it once."
+)
+
+_ChatResponseSerializer = inline_serializer(
+    name='ChatResponse',
+    fields={
+        'conversation_id': drf_serializers.UUIDField(),
+        'reply': drf_serializers.CharField(help_text=_REPLY_HELP_TEXT),
+    },
+)
+
+_ConversationSerializer = inline_serializer(
+    name='ChatConversation',
+    fields={
+        'id': drf_serializers.UUIDField(),
+        'title': drf_serializers.CharField(),
+        'created_at': drf_serializers.DateTimeField(),
+    },
+)
+
+_TranscriptMessageSerializer = inline_serializer(
+    name='ChatTranscriptMessage',
+    fields={
+        'role': drf_serializers.ChoiceField(choices=['user', 'assistant']),
+        'content': drf_serializers.CharField(help_text=_REPLY_HELP_TEXT),
+    },
+)
+
+_TranscriptSerializer = inline_serializer(
+    name='ChatTranscript',
+    fields={
+        'id': drf_serializers.UUIDField(),
+        'title': drf_serializers.CharField(),
+        'created_at': drf_serializers.DateTimeField(),
+        # inline_serializer returns an instance; recover the class for many=True
+        'messages': type(_TranscriptMessageSerializer)(many=True),
+    },
+)
+
+
+@extend_schema(
+    request=ChatRequestSerializer,
+    responses={
+        200: _ChatResponseSerializer,
+        400: _AIErrorSerializer,
+        401: _AIDetailErrorSerializer,
+        403: _AIDetailErrorSerializer,
+        404: _AIErrorSerializer,
+        409: _AIErrorSerializer,
+        429: _AIEitherErrorSerializer,
+        502: _AIErrorSerializer,
+        504: _AIErrorSerializer,
+    },
+    tags=['ai'],
+)
+@api_view(['POST'])
+@permission_classes([IsSeekerUser])
+@throttle_classes([AnonRateThrottle, UserRateThrottle, BurstRateThrottle,
+                   AIChatRateThrottle])
+def chat(request):
+    """One chat turn. The agent's tools are read-only — nothing is created."""
+    serializer = ChatRequestSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    conversation_id = serializer.validated_data.get('conversation_id')
+    try:
+        result = services.send_chat_message(
+            request.user,
+            message=serializer.validated_data['message'],
+            conversation_id=str(conversation_id) if conversation_id else None,
+        )
+    except ConversationNotFoundError:
+        return Response({'error': 'Conversation not found'},
+                        status=status.HTTP_404_NOT_FOUND)
+    except ConversationExhaustedError:
+        # Deliberately NOT the 504: this thread can never answer again.
+        return Response(
+            {'error': 'This conversation has reached its limit — start a new one'},
+            status=status.HTTP_409_CONFLICT)
+    except AgentLimitExceededError:
+        return Response(
+            {'error': 'The assistant took too long to answer — try a simpler question'},
+            status=status.HTTP_504_GATEWAY_TIMEOUT)
+    except AIQuotaExceededError:
+        return Response({'error': 'AI provider quota exceeded — try again later'},
+                        status=status.HTTP_429_TOO_MANY_REQUESTS)
+    except (AIProviderError, AIResponseInvalidError):
+        return Response({'error': 'AI provider unavailable — try again later'},
+                        status=status.HTTP_502_BAD_GATEWAY)
+    return Response(result)
+
+
+@extend_schema(
+    responses={
+        200: type(_ConversationSerializer)(many=True),
+        401: _AIDetailErrorSerializer,
+        403: _AIDetailErrorSerializer,
+        429: _AIDetailErrorSerializer,
+    },
+    tags=['ai'],
+)
+@api_view(['GET'])
+@permission_classes([IsSeekerUser])
+@throttle_classes([AnonRateThrottle, UserRateThrottle, BurstRateThrottle])
+def list_conversations(request):
+    """The requester's own chat threads, newest first. No LLM call."""
+    return Response(services.list_conversations(request.user))
+
+
+@extend_schema(
+    responses={
+        200: _TranscriptSerializer,
+        204: None,
+        401: _AIDetailErrorSerializer,
+        403: _AIDetailErrorSerializer,
+        404: _AIErrorSerializer,
+        429: _AIDetailErrorSerializer,
+    },
+    tags=['ai'],
+)
+@api_view(['GET', 'DELETE'])
+@permission_classes([IsSeekerUser])
+@throttle_classes([AnonRateThrottle, UserRateThrottle, BurstRateThrottle])
+def conversation_detail(request, conversation_id):
+    """GET the transcript, or DELETE the thread and its stored messages.
+
+    Neither makes an LLM call.
+    """
+    try:
+        if request.method == 'DELETE':
+            services.delete_conversation(
+                request.user, conversation_id=str(conversation_id))
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        return Response(services.get_conversation_messages(
+            request.user, conversation_id=str(conversation_id)))
+    except ConversationNotFoundError:
+        return Response({'error': 'Conversation not found'},
+                        status=status.HTTP_404_NOT_FOUND)

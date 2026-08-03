@@ -16,3 +16,12 @@ class ResumeImportRequestSerializer(serializers.Serializer):
     text = serializers.CharField(
         max_length=20000, required=False, allow_blank=True, default='')
     file = serializers.FileField(required=False, allow_null=True)
+
+
+class ChatRequestSerializer(serializers.Serializer):
+    # allow_blank defaults to False and trim_whitespace to True, so a
+    # whitespace-only message is rejected — which is what the 400 tests expect.
+    message = serializers.CharField(max_length=4000, trim_whitespace=True)
+    # Ownership is enforced in the service, which 404s rather than 403s so a
+    # stranger's conversation id is never confirmed to exist.
+    conversation_id = serializers.UUIDField(required=False, allow_null=True)
