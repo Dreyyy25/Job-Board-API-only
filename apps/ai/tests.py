@@ -3035,3 +3035,159 @@ class SanitizeReplyTests(TestCase):
         decoded_once = _html.unescape(out)
         self.assertEqual(decoded_once, "&lt;img src=x&gt; is how you write it")
         self._assert_no_live_markup(decoded_once)
+
+
+class ListConversationsTests(_ChatServiceFixture, TestCase):
+    def test_returns_own_conversations_newest_first(self):
+        from apps.ai.models import Conversation
+        from apps.ai.services import list_conversations
+        old = Conversation.objects.create(
+            user=self.seeker, title="older",
+            created_at=timezone.now() - timedelta(hours=2))
+        new = Conversation.objects.create(user=self.seeker, title="newer")
+        self.assertEqual([c["id"] for c in list_conversations(self.seeker)],
+                         [str(new.id), str(old.id)])
+
+    def test_returns_only_id_title_created_at(self):
+        from apps.ai.models import Conversation
+        from apps.ai.services import list_conversations
+        Conversation.objects.create(user=self.seeker, title="mine")
+        self.assertEqual(set(list_conversations(self.seeker)[0]),
+                         {"id", "title", "created_at"})
+
+    def test_never_returns_another_users_conversations(self):
+        from apps.ai.models import Conversation
+        from apps.ai.services import list_conversations
+        other = UserAccount.objects.create_user(
+            email="other2@example.com", password="Str0ng-Password!",
+            user_type="job_seeker")
+        Conversation.objects.create(user=other, title="theirs")
+        self.assertEqual(list_conversations(self.seeker), [])
+
+    def test_empty_list_when_none(self):
+        from apps.ai.services import list_conversations
+        self.assertEqual(list_conversations(self.seeker), [])
+
+    def test_listing_is_capped(self):
+        """Every chat POST without a conversation_id creates a row; unpaginated
+        this response grows without bound."""
+        from apps.ai.models import Conversation
+        from apps.ai.services import MAX_LISTED_CONVERSATIONS, list_conversations
+        for i in range(MAX_LISTED_CONVERSATIONS + 10):
+            Conversation.objects.create(user=self.seeker, title=f"c{i}")
+        self.assertEqual(len(list_conversations(self.seeker)),
+                         MAX_LISTED_CONVERSATIONS)
+
+    def test_query_budget(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        from apps.ai.models import Conversation
+        from apps.ai.services import list_conversations
+        for i in range(15):
+            Conversation.objects.create(user=self.seeker, title=f"c{i}")
+        with CaptureQueriesContext(connection) as ctx:
+            list_conversations(self.seeker)
+        self.assertLessEqual(len(ctx), 10)
+
+
+class DeleteConversationTests(_ChatServiceFixture, TestCase):
+    def test_deletes_the_row_and_the_checkpointer_thread(self):
+        from apps.ai.models import Conversation
+        from apps.ai.services import delete_conversation
+        saver = self._saver()
+        sent = self._send("hello", responses=[self._reply("hi")], checkpointer=saver)
+        cid = sent["conversation_id"]
+        delete_conversation(self.seeker, conversation_id=cid, checkpointer=saver)
+        self.assertEqual(Conversation.objects.count(), 0)
+        self.assertIsNone(saver.get_tuple({"configurable": {"thread_id": cid}}))
+
+    def test_another_users_conversation_is_not_found(self):
+        from apps.ai.exceptions import ConversationNotFoundError
+        from apps.ai.models import Conversation
+        from apps.ai.services import delete_conversation
+        intruder = UserAccount.objects.create_user(
+            email="nosy2@example.com", password="Str0ng-Password!",
+            user_type="job_seeker")
+        mine = Conversation.objects.create(user=self.seeker, title="private")
+        with self.assertRaises(ConversationNotFoundError):
+            delete_conversation(intruder, conversation_id=str(mine.id),
+                                checkpointer=self._saver())
+        self.assertEqual(Conversation.objects.count(), 1)
+
+    def test_unknown_id_raises_not_found(self):
+        from apps.ai.exceptions import ConversationNotFoundError
+        from apps.ai.services import delete_conversation
+        with self.assertRaises(ConversationNotFoundError):
+            delete_conversation(
+                self.seeker, conversation_id="00000000-0000-0000-0000-000000000000",
+                checkpointer=self._saver())
+
+    def test_malformed_id_raises_not_found_not_500(self):
+        from apps.ai.exceptions import ConversationNotFoundError
+        from apps.ai.services import delete_conversation
+        with self.assertRaises(ConversationNotFoundError):
+            delete_conversation(self.seeker, conversation_id="nope",
+                                checkpointer=self._saver())
+
+    def test_thread_is_deleted_before_the_row(self):
+        """Ordering is the whole safety argument: a failure must never leave
+        unreachable chat content behind."""
+        from apps.ai.models import Conversation
+        from apps.ai.services import delete_conversation
+        order = []
+
+        class _Saver:
+            def delete_thread(self, thread_id):
+                order.append(("thread", Conversation.objects.count()))
+
+        conversation = Conversation.objects.create(user=self.seeker, title="x")
+        delete_conversation(self.seeker, conversation_id=str(conversation.id),
+                            checkpointer=_Saver())
+        self.assertEqual(order, [("thread", 1)])   # row still present at purge
+        self.assertEqual(Conversation.objects.count(), 0)
+
+    def test_row_survives_when_the_thread_delete_fails(self):
+        """Client retries; nothing is silently half-deleted."""
+        from apps.ai.models import Conversation
+        from apps.ai.services import delete_conversation
+
+        class _Broken:
+            def delete_thread(self, thread_id):
+                raise RuntimeError("checkpointer unreachable")
+
+        conversation = Conversation.objects.create(user=self.seeker, title="x")
+        with self.assertRaises(RuntimeError):
+            delete_conversation(self.seeker, conversation_id=str(conversation.id),
+                                checkpointer=_Broken())
+        self.assertEqual(Conversation.objects.count(), 1)
+
+
+class ConversationPurgeSignalTests(_ChatServiceFixture, TestCase):
+    def test_deleting_the_user_purges_the_checkpointer_thread(self):
+        """CASCADE removes the row; without the signal the MESSAGES survive in
+        Postgres, unreachable and unpurgeable. This is the erasure path."""
+        saver = self._saver()
+        sent = self._send("hello", responses=[self._reply("hi")], checkpointer=saver)
+        cid = sent["conversation_id"]
+        self.assertIsNotNone(saver.get_tuple({"configurable": {"thread_id": cid}}))
+        with patch("apps.ai.signals.get_checkpointer", return_value=saver):
+            self.seeker.delete()
+        self.assertIsNone(saver.get_tuple({"configurable": {"thread_id": cid}}))
+
+    def test_bulk_queryset_delete_purges_the_thread(self):
+        from apps.ai.models import Conversation
+        saver = self._saver()
+        sent = self._send("hello", responses=[self._reply("hi")], checkpointer=saver)
+        cid = sent["conversation_id"]
+        with patch("apps.ai.signals.get_checkpointer", return_value=saver):
+            Conversation.objects.filter(user=self.seeker).delete()
+        self.assertIsNone(saver.get_tuple({"configurable": {"thread_id": cid}}))
+
+    def test_fast_delete_is_disabled_so_the_signal_actually_fires(self):
+        """Django skips signals on its fast-delete path; registering a receiver
+        is what disables it. Assert that directly."""
+        from django.db.models.deletion import Collector
+        from apps.ai.models import Conversation
+        collector = Collector(using="default")
+        self.assertFalse(collector.can_fast_delete(
+            Conversation.objects.filter(user=self.seeker)))

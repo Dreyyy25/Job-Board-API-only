@@ -6,6 +6,7 @@ import re
 import time
 
 from django.core.exceptions import ValidationError  # malformed UUID -> 404, not 500
+from django.db import transaction
 from django.utils import timezone
 
 from langchain.agents import create_agent
@@ -860,12 +861,69 @@ def _rollback_new_conversation(conversation, checkpointer, created_now):
 
     Without this, a client retrying a failing request accumulates one empty
     conversation per attempt. An existing conversation is never touched.
+
+    The pre_delete receiver does the thread purge, so hand it the injected
+    checkpointer. Failures are swallowed: this runs on an error path and must
+    never replace the original provider error with a bookkeeping one.
     """
     if not created_now:
         return
+    conversation._checkpointer = checkpointer
     try:
-        checkpointer.delete_thread(str(conversation.id))
-    except Exception:  # pragma: no cover - best effort; the row still goes
-        logger.warning('ai chat rollback: thread delete failed conversation=%s',
-                       conversation.id)
-    conversation.delete()
+        conversation.delete()
+    except Exception:  # pragma: no cover - must not mask the original failure
+        logger.warning('ai chat rollback failed conversation=%s', conversation.id)
+
+
+# Every chat POST without a conversation_id creates a row, so an unpaginated
+# listing grows without bound. Newest 50 is plenty for a sidebar.
+MAX_LISTED_CONVERSATIONS = 50
+
+
+def list_conversations(user):
+    """The requester's own conversations, newest first.
+
+    Model Meta.ordering already sorts newest-first; .values() keeps this to a
+    single query and returns exactly the three documented fields.
+    """
+    return [
+        {
+            'id': str(row['id']),
+            'title': row['title'],
+            'created_at': row['created_at'].isoformat(),
+        }
+        for row in Conversation.objects.filter(user=user).values(
+            'id', 'title', 'created_at')[:MAX_LISTED_CONVERSATIONS]
+    ]
+
+
+def delete_conversation(user, *, conversation_id, checkpointer=None):
+    """Delete a conversation and its stored messages.
+
+    The actual purge happens in the pre_delete receiver (apps/ai/signals.py),
+    so there is exactly one purge path and it also covers account deletion and
+    bulk deletes. Ordering is thread-first and deliberate: the checkpointer
+    runs on its own autocommit psycopg3 pool and cannot join a Django
+    transaction, so these two deletes cannot be atomic without two-phase
+    commit. Thread-first means a failure leaves everything intact for a retry,
+    whereas row-first could strand message content nothing references.
+
+    The delete itself runs inside its own transaction.atomic(). Django wraps
+    Collector.delete() in atomic(savepoint=False): when the pre_delete
+    receiver raises (thread delete failed), that inner block has no
+    savepoint of its own to roll back to, so it leaves the connection
+    needing a rollback that only the nearest atomic block WITH a savepoint
+    can clear. Without this wrapper, a caller already inside a transaction
+    (a test, or a view under ATOMIC_REQUESTS) would find every later query
+    on that connection raising TransactionManagementError even though the
+    conversation row correctly survived.
+    """
+    try:
+        conversation = Conversation.objects.get(id=conversation_id, user=user)
+    except (Conversation.DoesNotExist, ValidationError, ValueError, TypeError):
+        raise ConversationNotFoundError()
+
+    # Hand the receiver the injected checkpointer so tests keep their seam.
+    conversation._checkpointer = checkpointer or get_checkpointer()
+    with transaction.atomic():
+        conversation.delete()
