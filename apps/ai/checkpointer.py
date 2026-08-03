@@ -9,6 +9,8 @@ transaction — see `delete_conversation` in services.py for what that means.
 """
 from urllib.parse import quote
 
+from django.conf import settings
+
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from psycopg.rows import dict_row
@@ -35,9 +37,25 @@ def build_conn_string() -> str:
 
 
 def get_checkpointer():
-    """Process-wide PostgresSaver. Built once — a pool per request exhausts Postgres."""
+    """Process-wide PostgresSaver. Built once — a pool per request exhausts Postgres.
+
+    AI_BLOCK_REAL_CHECKPOINTER (set in jobApp/settings/test.py) makes any
+    unpatched call during the test suite fail loudly instead of silently
+    opening a real pool against config.DB_NAME — a module constant Django's
+    test runner does not rewrite to test_<db> the way it rewrites DATABASES.
+    Without this, an offline-looking test that forgets to inject/patch a
+    checkpointer would issue real writes against the developer's database and
+    only pass because that database happens to already have the checkpointer
+    schema installed.
+    """
     global _checkpointer, _pool
     if _checkpointer is None:
+        if getattr(settings, 'AI_BLOCK_REAL_CHECKPOINTER', False):
+            raise AssertionError(
+                'apps.ai.checkpointer.get_checkpointer() was called for real '
+                'during the test suite. Inject a fake/in-memory checkpointer, '
+                'or patch get_checkpointer where it is looked up, instead of '
+                'letting this function open a live Postgres pool.')
         _pool = ConnectionPool(
             conninfo=build_conn_string(),
             min_size=1,

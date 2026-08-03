@@ -25,6 +25,14 @@ AUTH_REFRESH_COOKIE_SECURE = False
 CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOWED_ORIGINS = []
 
+# The AI test suite must be fully offline. apps.ai.checkpointer.get_checkpointer()
+# checks this and raises AssertionError instead of opening a real Postgres pool
+# against config.DB_NAME (a module constant the test runner never rewrites to
+# test_<db>). apps.ai.tests.CheckpointerTests deliberately exercises the real
+# function body (with ConnectionPool itself mocked out) and opts back in with
+# @override_settings(AI_BLOCK_REAL_CHECKPOINTER=False) per test.
+AI_BLOCK_REAL_CHECKPOINTER = True
+
 # Bump anon/user/burst ceilings high so tests don't accidentally 429 each
 # other through the shared LocMemCache. Scoped rates (register/login/
 # token_refresh) are preserved from base so the existing scoped-throttle

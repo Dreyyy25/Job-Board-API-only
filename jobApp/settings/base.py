@@ -264,6 +264,15 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 
+# Guards apps.ai.checkpointer.get_checkpointer(): when True, calling it
+# without a test having first patched it raises AssertionError instead of
+# silently opening a real Postgres pool against config.DB_NAME. That name is
+# a module constant Django's test runner does not rewrite to test_<db> the
+# way it rewrites DATABASES, so an unpatched call during the test suite would
+# otherwise reach the developer's real database. Off everywhere except
+# test.py — production and development legitimately want the real pool.
+AI_BLOCK_REAL_CHECKPOINTER = False
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field
 

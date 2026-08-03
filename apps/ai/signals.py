@@ -9,6 +9,31 @@ transcript in Postgres: unreachable by any user, unpurgeable by any code path.
 Registering a pre_delete receiver also disables Django's fast-delete
 optimisation, which is what makes this fire on cascades and bulk deletes
 rather than only on instance.delete().
+
+Two consequences of the thread-first, fail-closed design worth stating
+explicitly (both deliberate, per the deletion-ordering argument in the
+task brief):
+
+* Partial-cascade transcript loss. Deleting a user with N conversations
+  purges threads and rows one row at a time, each in its own DB
+  transaction (see delete_conversation / _rollback_new_conversation for
+  why the purge itself cannot join the Django transaction). If the purge
+  for conversation #2 fails, Django rolls back that ROW delete — but
+  conversation #1's thread is already gone: the checkpointer runs on an
+  autocommit pool with no transaction to roll back. The failure still
+  aborts the whole cascade (the user row itself does not delete either),
+  so nothing is stranded UNREACHABLE — every surviving row is still
+  listed and its (now-empty) thread purge can be retried. But a
+  conversation can end up rowed-and-listed with its transcript already
+  gone, which is a real, visible inconsistency a retry does not undo for
+  that one conversation.
+* Fail-closed blocks erasure. While the checkpointer is unreachable, this
+  receiver raising means account deletion itself fails — a GDPR erasure
+  request 500s instead of completing. That is intentional: the
+  alternative (deleting the account row while a purge failure leaves a
+  transcript behind) is the unpurgeable-forever failure this whole module
+  exists to prevent. An operator must restore checkpointer access before
+  the erasure can complete, not silently accept a partial one.
 """
 import logging
 

@@ -3,7 +3,7 @@ from typing import Any
 from unittest.mock import patch
 
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from langchain_core.runnables import RunnableLambda
 from rest_framework.test import APITestCase
@@ -1599,11 +1599,20 @@ class ConversationModelTests(TestCase):
         self.assertEqual([c.id for c in Conversation.objects.all()], [new.id, old.id])
 
     def test_deleting_user_deletes_conversations(self):
-        """Personal content, not a billing record: CASCADE, not SET_NULL."""
+        """Personal content, not a billing record: CASCADE, not SET_NULL.
+
+        The pre_delete receiver runs on this cascade too, and with no
+        _checkpointer attached (cascades have no such hint) it falls back to
+        the real get_checkpointer() — patched here purely so that fallback
+        doesn't reach a live Postgres pool. The subject under test stays the
+        CASCADE behaviour, asserted below exactly as before.
+        """
+        from unittest.mock import MagicMock
         from apps.ai.models import Conversation
         user = self._seeker()
         Conversation.objects.create(user=user, title="mine")
-        user.delete()
+        with patch("apps.ai.signals.get_checkpointer", return_value=MagicMock()):
+            user.delete()
         self.assertEqual(Conversation.objects.count(), 0)
 
     def test_related_name_is_ai_conversations(self):
@@ -1658,6 +1667,13 @@ class CheckpointerTests(TestCase):
         self.assertIn("pass%20word", conn)
         self.assertNotIn("pass+word", conn)
 
+    # These three tests deliberately exercise get_checkpointer()'s real body —
+    # singleton construction, PostgresSaver/serde wiring, pool kwargs — with
+    # only ConnectionPool itself mocked out, so no socket ever opens. That
+    # means they must opt back out of AI_BLOCK_REAL_CHECKPOINTER (test.py
+    # default: True), which exists precisely to stop everyone ELSE from
+    # reaching this code path unpatched.
+    @override_settings(AI_BLOCK_REAL_CHECKPOINTER=False)
     def test_saver_is_built_with_a_strict_msgpack_serializer(self):
         """The env var is a no-op (langgraph snapshots it at import, long before
         this module loads), so strictness must be passed explicitly. The default
@@ -1671,6 +1687,7 @@ class CheckpointerTests(TestCase):
         import os
         self.assertEqual(os.environ.get("LANGGRAPH_STRICT_MSGPACK"), "true")
 
+    @override_settings(AI_BLOCK_REAL_CHECKPOINTER=False)
     def test_get_checkpointer_is_a_singleton(self):
         from apps.ai import checkpointer as cp
         with patch.object(cp, "ConnectionPool") as pool:
@@ -1679,6 +1696,7 @@ class CheckpointerTests(TestCase):
         self.assertIs(first, second)
         self.assertEqual(pool.call_count, 1)
 
+    @override_settings(AI_BLOCK_REAL_CHECKPOINTER=False)
     def test_pool_configured_autocommit_dict_row_and_open(self):
         from apps.ai import checkpointer as cp
         with patch.object(cp, "ConnectionPool") as pool:
@@ -1688,6 +1706,16 @@ class CheckpointerTests(TestCase):
         self.assertIs(kwargs["kwargs"]["row_factory"], cp.dict_row)
         # Explicit: psycopg_pool's default is deprecated and will flip to False.
         self.assertTrue(kwargs["open"])
+
+    def test_real_checkpointer_is_blocked_under_test_settings(self):
+        """Proves the guard: with no override_settings and no ConnectionPool
+        patch, calling the real get_checkpointer() must fail loudly instead
+        of silently opening a pool against config.DB_NAME (the developer's
+        real database — Django's test runner does not rewrite that module
+        constant to test_<db>)."""
+        from apps.ai import checkpointer as cp
+        with self.assertRaises(AssertionError):
+            cp.get_checkpointer()
 
 
 class CheckpointerSetupCommandTests(TestCase):
@@ -3160,6 +3188,25 @@ class DeleteConversationTests(_ChatServiceFixture, TestCase):
             delete_conversation(self.seeker, conversation_id=str(conversation.id),
                                 checkpointer=_Broken())
         self.assertEqual(Conversation.objects.count(), 1)
+
+    def test_default_checkpointer_falls_back_to_get_checkpointer(self):
+        """Every other test in this class injects a checkpointer explicitly,
+        so none of them would catch a regression of the `checkpointer or
+        get_checkpointer()` fallback itself. Patches
+        apps.ai.services.get_checkpointer — the name delete_conversation
+        actually calls for that fallback — not apps.ai.signals.get_checkpointer:
+        delete_conversation always attaches _checkpointer to the instance
+        before deleting it, so the RECEIVER's own fallback is never reached
+        on this path; only the service's is."""
+        from apps.ai.models import Conversation
+        from apps.ai.services import delete_conversation
+        saver = self._saver()
+        conversation = Conversation.objects.create(user=self.seeker, title="x")
+        with patch("apps.ai.services.get_checkpointer", return_value=saver):
+            delete_conversation(self.seeker, conversation_id=str(conversation.id))
+        self.assertEqual(Conversation.objects.count(), 0)
+        self.assertIsNone(
+            saver.get_tuple({"configurable": {"thread_id": str(conversation.id)}}))
 
 
 class ConversationPurgeSignalTests(_ChatServiceFixture, TestCase):

@@ -447,6 +447,9 @@ def screen_applicants(user, *, job_post_id, refresh=False, model=None):
 
 
 CONVERSATION_TITLE_CHARS = 60
+# Every chat POST without a conversation_id creates a row, so an unpaginated
+# listing grows without bound. Newest 50 is plenty for a sidebar.
+MAX_LISTED_CONVERSATIONS = 50
 # One turn may legitimately need several model calls (search, then details,
 # then an answer). Eight is generous for that and still bounds a runaway loop.
 MAX_MODEL_CALLS_PER_TURN = 8
@@ -865,19 +868,25 @@ def _rollback_new_conversation(conversation, checkpointer, created_now):
     The pre_delete receiver does the thread purge, so hand it the injected
     checkpointer. Failures are swallowed: this runs on an error path and must
     never replace the original provider error with a bookkeeping one.
+
+    conversation.delete() runs inside its own transaction.atomic(), same as
+    delete_conversation and for the same reason: Django wraps Collector.delete()
+    in atomic(savepoint=False), so a receiver failure with no savepoint of its
+    own to unwind to leaves the caller's transaction needing a rollback it can
+    never get. Swallowing the exception here without a savepoint would poison
+    the connection silently — no exception surfaces, but every later query in
+    the same transaction starts raising TransactionManagementError. Harmless
+    today only because production runs autocommit; the moment anything wraps a
+    chat turn in @transaction.atomic this would have been a live bug.
     """
     if not created_now:
         return
     conversation._checkpointer = checkpointer
     try:
-        conversation.delete()
+        with transaction.atomic():
+            conversation.delete()
     except Exception:  # pragma: no cover - must not mask the original failure
         logger.warning('ai chat rollback failed conversation=%s', conversation.id)
-
-
-# Every chat POST without a conversation_id creates a row, so an unpaginated
-# listing grows without bound. Newest 50 is plenty for a sidebar.
-MAX_LISTED_CONVERSATIONS = 50
 
 
 def list_conversations(user):
