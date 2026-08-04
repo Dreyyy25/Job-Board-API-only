@@ -84,7 +84,7 @@ class HealthzTests(TestCase):
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `uv run python manage.py test jobApp -v 2`
-Expected: the two healthz tests FAIL with 404 (route absent); the schema test PASSES already (it guards the invariant going forward). If Django reports "no tests found", the discovery assumption is wrong — stop and report instead of moving tests into an app.
+Expected red state (verified empirically during plan review): `test_healthz_returns_ok` **FAILS** on the 404 assertion (route absent); `test_healthz_db_failure_returns_503` **ERRORS** with `AttributeError: module 'jobApp' has no attribute 'views'` (the mock patch target resolves at test time and `jobApp/views.py` doesn't exist yet — an ERROR here is the correct red, not a problem); the schema test PASSES already (it guards the invariant going forward). Only if Django reports "no tests found" is the discovery assumption wrong — stop and report instead of moving tests into an app.
 
 - [ ] **Step 3: Add dependencies**
 
@@ -114,7 +114,7 @@ Below `STATIC_URL = 'static/'` add:
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 ```
 
-In `jobApp/settings/production.py` (after the cookie block, before the asserts) add the FULL storages dict — `default` must be restated or Django drops file-upload storage:
+In `jobApp/settings/production.py` (after the cookie block, before the asserts) add the FULL storages dict — `STORAGES` is replaced wholesale, not merged, so `default` must be restated to keep the framework's default file storage configured (no feature currently writes files, but a silently-missing `default` backend is a trap for whoever adds one):
 
 ```python
 # Whitenoise serves hashed+compressed static files; `default` must be
@@ -152,7 +152,7 @@ In `jobApp/urls.py`: add `from jobApp.views import healthz` below the existing i
 - [ ] **Step 6: Run the new tests, then the full suite**
 
 Run: `uv run python manage.py test jobApp -v 2` → 3/3 PASS.
-Run: `uv run python manage.py test --noinput` → 407 tests, OK.
+Run: `uv run python manage.py test --noinput` → 407 tests, OK. Expected noise: a whitenoise `UserWarning: No directory at: ...staticfiles` per test process — test settings run `DEBUG=False` with no collected staticfiles dir on disk, so whitenoise warns and serves nothing; that is expected, not a regression (it appears in CI too).
 Run: `uv run python manage.py spectacular --validate --fail-on-warn > $null` → exit 0.
 Run: `uv run ruff check .` and `uv run ruff format --check .` → both exit 0 (format the new files with `uv run ruff format jobApp/` first if needed).
 
@@ -219,20 +219,32 @@ exec gunicorn jobApp.wsgi:application \
     --error-logfile -
 ```
 
+Immediately after creating BOTH `.gitattributes` (Step 1) and this file, stage them and verify the line endings BEFORE anything builds an image from the working tree:
+
+```
+git add .gitattributes docker/entrypoint.sh
+git ls-files --eol docker/entrypoint.sh
+```
+
+Expected: `i/lf w/lf`. If it shows `w/crlf`: the gitattribute canNOT rewrite an existing working-tree file (it applies only at add/checkout — verified empirically during plan review), so fix the WORKING TREE: delete `docker/entrypoint.sh` and run `git checkout -- docker/entrypoint.sh` to re-smudge it from the (already LF-normalized) index, then re-verify. Docker copies the working tree, so a CRLF working copy would bake a broken `#!/bin/sh\r` shebang into the image and fail only at compose boot, two steps away from the cause.
+
 - [ ] **Step 4: Create `.dockerignore`**
 
 ```
 .git
 .github
-.venv
-.env
-.env.docker
+.claude
 .superpowers
+.ruff_cache
 .idea
 .vscode
-__pycache__
-*.py[cod]
-*.log
+.venv
+**/.venv
+**/.env*
+**/__pycache__
+**/*.py[cod]
+**/*.log
+.python-version
 .DS_Store
 Thumbs.db
 db.sqlite3
@@ -246,10 +258,13 @@ docker-compose.yml
 .dockerignore
 .gitignore
 .gitattributes
-.python-version
 ```
 
-(`.env*` files and VCS/tooling metadata must never enter the build context; docs and the Postman collection are dead weight in an image. `uv.lock`/`pyproject.toml` are NOT ignored — the build needs them.)
+Two load-bearing subtleties (adversarial review both caught real leaks here):
+- `.dockerignore` patterns are **context-root-relative** (Go `filepath.Match`), unlike `.gitignore` — a bare `.env` entry excludes only the root-level file. The `**/` forms are what exclude nested copies.
+- `.claude/` MUST be excluded: it can contain git worktrees (e.g. `.claude/worktrees/<name>/`) holding a **live copy of the real `.env`** plus a 130+ MB `.venv`. They are invisible to `git status` (excluded via `.git/info/exclude`) but Docker does not read git excludes — without this entry, `COPY . .` bakes real secrets into an image layer.
+
+(`uv.lock`/`pyproject.toml` are NOT ignored — the build needs them. `**/.env*` also drops `.env.docker.example` from the context; nothing in the image needs it.)
 
 - [ ] **Step 5: Create `Dockerfile`**
 
@@ -283,17 +298,20 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 COPY --from=builder /app/.venv /app/.venv
-COPY --chown=app:app . .
+COPY . .
 
 # Build-time collectstatic under production settings (manifest + compression).
 # The env values are single-RUN dummies: they satisfy config.py's import-time
 # requirements and production.py's asserts, and never persist in any layer.
+# Everything under /app stays ROOT-owned deliberately: the app never writes
+# to disk at runtime (no media storage exists; logging is stderr; the
+# whitenoise manifest is read-only after build), so the gunicorn user gets
+# read-only code — least privilege, no code-persistence primitive.
 RUN chmod +x docker/entrypoint.sh && \
     SECRET_KEY=build-only-dummy-secret-key-for-collectstatic-0123456789abcdefgh \
     DB_NAME=build DB_USER=build DB_PASSWORD=build \
     GEMINI_API_KEY=build ALLOWED_HOSTS=build.invalid \
-    python manage.py collectstatic --noinput && \
-    chown -R app:app /app/staticfiles
+    python manage.py collectstatic --noinput
 
 USER app
 
@@ -304,6 +322,8 @@ ENTRYPOINT ["/app/docker/entrypoint.sh"]
 
 - [ ] **Step 6: Build and inspect**
 
+Run the `docker run` line in **Git Bash**, not PowerShell — PowerShell 5.1 mangles the nested quotes (empirically verified during plan review):
+
 ```
 docker build -t jobboard-api:local .
 docker image ls jobboard-api:local
@@ -312,14 +332,18 @@ docker run --rm --entrypoint sh jobboard-api:local -c "whoami && ls staticfiles/
 
 Expected: build succeeds; `whoami` prints `app` (non-root); `staticfiles/admin/css` lists both original and hash-named files (manifest storage collected); `deps ok`. The container run needs no DB — it only execs a shell, not the entrypoint.
 
-- [ ] **Step 7: Verify no dummy leaked into image config**
+- [ ] **Step 7: Verify nothing leaked into the image — config, filesystem, or permissions**
+
+(Git Bash for the `docker run` lines.)
 
 ```
-docker history --no-trunc jobboard-api:local | Select-String "SECRET_KEY"
+docker history --no-trunc jobboard-api:local | grep SECRET_KEY
 docker inspect jobboard-api:local --format "{{.Config.Env}}"
+docker run --rm --entrypoint sh jobboard-api:local -c "find . -name '.env*' -o -name '.claude' -o -name '.ruff_cache'"
+docker run --rm --entrypoint sh jobboard-api:local -c "touch /app/probe 2>&1; true"
 ```
 
-Expected: `docker history` shows the dummy only inside the single collectstatic `RUN` line (build args in RUN lines are visible in history — that is fine, they are labeled dummies); `inspect` Env contains only `PATH`, `PYTHONUNBUFFERED`, `DJANGO_SETTINGS_MODULE`, and base-image vars — **no** SECRET_KEY/DB_*/GEMINI values.
+Expected: `docker history` shows the dummy only inside the single collectstatic `RUN` line (build args in RUN lines are visible in history — fine, they are labeled dummies); `inspect` Env contains only `PATH`, `PYTHONUNBUFFERED`, `DJANGO_SETTINGS_MODULE`, and base-image vars — **no** SECRET_KEY/DB_*/GEMINI values; the `find` prints **nothing** (no env file, no `.claude`, no cache dirs made it into any layer — this is the check that would have caught a worktree `.env` leak); the `touch` prints `Permission denied` (runtime user cannot modify /app).
 
 - [ ] **Step 8: Commit**
 
@@ -328,7 +352,7 @@ git add .gitattributes .gitignore .dockerignore docker/entrypoint.sh Dockerfile
 git commit -m "feat: production Docker image (multi-stage uv build, non-root, whitenoise static)"
 ```
 
-Then confirm `git ls-files --eol docker/entrypoint.sh` shows `w/lf` (or `w/crlf` is ABSENT — the attribute must force LF in the working tree; if it shows `w/crlf`, run `git rm --cached docker/entrypoint.sh && git add docker/entrypoint.sh` after confirming `.gitattributes` was staged first, and amend).
+(The LF check already happened in Step 3, before the build — nothing to re-verify here.)
 
 ---
 
@@ -386,10 +410,17 @@ services:
       # postgres:18 images mount data at /var/lib/postgresql (not .../data).
       - pgdata:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U jobboard -d job_board"]
+      # -h 127.0.0.1 forces the check onto TCP: during first-boot initdb the
+      # image runs a TEMPORARY socket-only server, and a socket pg_isready
+      # passes while db:5432 still refuses connections — releasing web into a
+      # crash. The temp server never listens on TCP, so this form only goes
+      # healthy once the real server is up. (Adversarial review, verified
+      # against the postgres image entrypoint source.)
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U jobboard -d job_board"]
       interval: 5s
       timeout: 5s
       retries: 10
+      start_period: 10s
 
   web:
     build: .
@@ -424,22 +455,22 @@ curl.exe -fsS -o NUL -w "%{http_code}" http://localhost:8000/static/admin/css/ba
 curl.exe -fsS -o NUL -w "%{http_code}" http://localhost:8000/api/docs/
 ```
 
-Expected: `{"status": "ok"}`, `200`, `200`. Then a register + login round-trip — consult `API_DOCUMENTATION.md` for the exact register payload, e.g.:
+Expected: `{"status": "ok"}`, `200`, `200`. Then a register + login round-trip. The payload below is **authoritative** (verified against the live serializers during plan review — do NOT defer to `API_DOCUMENTATION.md`, whose register examples are known-stale: its example password fails `CommonPasswordValidator`, and it still shows `tokens.refresh` in the response body, which register no longer returns since the refresh token moved to the httpOnly cookie):
 
 ```
-curl.exe -fsS -X POST http://localhost:8000/api/v1/accounts/register/ -H "Content-Type: application/json" -d "{\"email\":\"smoke@example.com\",\"password\":\"SmokeTest12345\",\"user_type\":\"job_seeker\"}"
-curl.exe -fsS -i -X POST http://localhost:8000/api/v1/accounts/login/ -H "Content-Type: application/json" -d "{\"email\":\"smoke@example.com\",\"password\":\"SmokeTest12345\"}"
+curl.exe -sS -w "\n%{http_code}" -X POST http://localhost:8000/api/v1/accounts/register/ -H "Content-Type: application/json" -d "{\"email\":\"smoke@example.com\",\"password\":\"SmokeTest12345\",\"user_type\":\"job_seeker\"}"
+curl.exe -sS -i -X POST http://localhost:8000/api/v1/accounts/login/ -H "Content-Type: application/json" -d "{\"email\":\"smoke@example.com\",\"password\":\"SmokeTest12345\"}"
 ```
 
-(Double-quoted JSON with escaped quotes — single-quoted strings don't pass through to curl.exe intact from PowerShell.)
+(No `-f`: on a 4xx, `-f` discards the response body — exactly the field-error listing you need to diagnose. Double-quoted JSON with escaped quotes — single-quoted strings don't pass through to curl.exe intact from PowerShell. On a rerun against a kept volume, register 400s with "already registered" — that's the volume persisting, not a failure; skip to login.)
 
-Expected: register 201 with a `profile` payload and `tokens.access`; login 200 whose headers include `Set-Cookie: refresh_token=...; HttpOnly; Path=/api/v1/accounts/`. (Adjust field names to whatever API_DOCUMENTATION.md specifies; a 400 listing missing fields is payload drift, not a deploy failure — fix the payload, not the app.)
+Expected: register 201 with a `profile` payload and `tokens.access` (and NO `tokens.refresh` in the body); login 200 whose headers include `Set-Cookie: refresh_token=...; HttpOnly; Path=/api/v1/accounts/`.
 
 - [ ] **Step 5: Persistence check + teardown**
 
 ```
 docker compose restart web
-curl -fsS http://localhost:8000/healthz
+curl.exe -fsS http://localhost:8000/healthz
 docker compose down
 ```
 
@@ -454,11 +485,12 @@ git commit -m "feat: docker-compose parity harness for local image verification"
 
 ---
 
-### Task 4: DEPLOYMENT.md + CLAUDE.md
+### Task 4: DEPLOYMENT.md + CLAUDE.md + stale-doc fixes
 
 **Files:**
 - Create: `DEPLOYMENT.md` (repo root)
 - Modify: `CLAUDE.md` (insert new section between `## CI and git workflow` and `## Architecture`)
+- Modify: `API_DOCUMENTATION.md` (two stale auth-example spots only)
 
 **Interfaces:**
 - Consumes: image/entrypoint behavior (Task 2), compose procedure (Task 3), `/healthz` (Task 1).
@@ -520,7 +552,10 @@ Any Postgres 14+ reachable from Render works — the app takes five discrete
 `DB_*` vars, so Render Postgres and external providers (Neon, Supabase, ...)
 are interchangeable. Free-tier realities:
 
-- **Render free Postgres expires after 30 days.** External free tiers don't.
+- **Render free Postgres expires after 30 days.** External free tiers vary:
+  Neon's doesn't expire; some others (e.g. Supabase) pause idle projects
+  after about a week until manually restored — check your provider's policy
+  against an API that will sit idle.
 - The AI chat checkpointer stores its tables in the **same** database;
   no extra configuration.
 
@@ -528,20 +563,29 @@ are interchangeable. Free-tier realities:
 
 - Free web services spin down when idle; the first request after sleep is
   slow (cold start + migrations re-check).
-- **Uploaded media is ephemeral.** `CompanyImages` uploads land on the
-  container's local disk and vanish on every deploy/restart. Object storage
-  (S3/R2) is future work — treat image upload as demo-only until then.
+- **No file uploads are stored.** Company images are external URLs
+  (`CompanyImages.image_url`), and the AI resume-import PDF is parsed in
+  memory and discarded — nothing writes to the container's disk, so there
+  is nothing to lose on restart. Object storage only becomes relevant if a
+  real upload feature is ever added.
 - No shell on free instances. To create a superuser, run it from your
   machine against the remote DB:
 
       # .env temporarily pointed at the remote DB_* values
       uv run python manage.py createsuperuser
 
+  Use your Postgres provider's **external** connection hostname here — the
+  internal hostname the web service uses does not resolve from outside the
+  platform.
+
 ## 6. Verifying a deploy
 
 1. `https://<app>.onrender.com/healthz` → `{"status": "ok"}`
-2. `https://<app>.onrender.com/api/docs/` renders (whitenoise static OK).
-3. Register + login round-trip against `/api/v1/accounts/`.
+2. `https://<app>.onrender.com/static/admin/css/base.css` → 200
+   (whitenoise static serving OK — note `/api/docs/` proves nothing about
+   static files; Swagger UI loads from a CDN).
+3. `https://<app>.onrender.com/api/docs/` renders (app + schema OK).
+4. Register + login round-trip against `/api/v1/accounts/`.
 ```
 
 - [ ] **Step 2: Insert the CLAUDE.md section**
@@ -554,13 +598,22 @@ Between the end of `## CI and git workflow` (after the "...prune locally with `g
 `Dockerfile` builds the production image: multi-stage uv → `python:3.13-slim`, non-root user, whitenoise-served static files collected at build time under production settings with inline dummy env. The entrypoint (`docker/entrypoint.sh`) runs `migrate` + `ai_checkpointer_setup` (both idempotent — Render's free tier has no pre-deploy hook) and then gunicorn with `--timeout 120`, which must stay above the AI chat's 90 s deadline. `docker compose up --build` runs that exact image against Postgres 18 locally — copy `.env.docker.example` to `.env.docker` (git-ignored) first. `GET /healthz` is a plain-Django health endpoint (cheap DB ping, no DRF, deliberately invisible to the OpenAPI schema). Render deployment — env table, health-check path, free-tier caveats — is documented in `DEPLOYMENT.md`; registry push and Render service setup are user-owned. Shell scripts are forced to LF via `.gitattributes` — don't commit `.sh` files with CRLF.
 ```
 
-- [ ] **Step 3: Verify docs claims and commit**
+- [ ] **Step 3: Fix the two known-stale spots in API_DOCUMENTATION.md**
 
-Re-read both insertions against the actual Task 1–3 artifacts (paths, env names, port, timeout, health path). Then:
+Plan review verified these against the live code — both predate the cookie-auth hardening:
+
+1. The register example's password `password123` fails `CommonPasswordValidator` — replace it (in the register request AND any login examples that reuse it) with `SmokeTest12345` (verified accepted).
+2. The register response example still shows `tokens.refresh` in the body — remove it; register/login return only `tokens.access` in the body, with the refresh token in the httpOnly cookie. If the response example already documents the cookie, leave that part as is.
+
+Change nothing else in that file.
+
+- [ ] **Step 4: Verify docs claims and commit**
+
+Re-read the insertions against the actual Task 1–3 artifacts (paths, env names, port, timeout, health path). Then:
 
 ```bash
-git add DEPLOYMENT.md CLAUDE.md
-git commit -m "docs: Render deployment guide and Docker workflow notes"
+git add DEPLOYMENT.md CLAUDE.md API_DOCUMENTATION.md
+git commit -m "docs: Render deployment guide, Docker workflow notes, stale auth examples fixed"
 ```
 
 ---
@@ -599,7 +652,7 @@ PR: base `staging`, title `Docker image and Render deployment support`, body (ve
 - **docker-compose parity harness** — runs the exact production image against Postgres 18 locally (`.env.docker` git-ignored, example committed); verified end-to-end: healthz, admin static via whitenoise, register/login round-trip, restart idempotence.
 - **Production server support** — gunicorn + whitenoise as regular deps, `STATIC_ROOT`, production `STORAGES` (default restated + compressed-manifest static).
 - **`GET /healthz`** — plain-Django health endpoint (cheap DB ping, 200/503), used as Render's health-check path; deliberately invisible to the OpenAPI schema, with tests locking both behaviors.
-- **DEPLOYMENT.md** — Render setup: env table, image build/tag commands, free-tier caveats (idle spin-down, 30-day free Postgres, ephemeral media). Registry push and Render service creation stay manual.
+- **DEPLOYMENT.md** — Render setup: env table, image build/tag commands, free-tier caveats (idle spin-down, 30-day free Postgres, no shell). Registry push and Render service creation stay manual. Also fixes two stale auth examples in API_DOCUMENTATION.md (weak example password, refresh token no longer in response body).
 
 ## Notes
 
