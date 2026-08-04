@@ -10,6 +10,16 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.1/ref/settings/
 """
 
+# Defence in depth for the LangGraph checkpointer's deserializer. LangGraph
+# snapshots this into a module constant the first time its serde package is
+# imported, and `import langchain.agents` triggers that — so it can only be set
+# by something that runs before any app module. Settings qualify. The
+# authoritative control is the explicit serializer in apps/ai/checkpointer.py,
+# which does not depend on import order at all.
+import os
+
+os.environ.setdefault("LANGGRAPH_STRICT_MSGPACK", "true")
+
 from pathlib import Path
 from datetime import timedelta
 
@@ -45,6 +55,7 @@ INSTALLED_APPS = [
     'apps.jobs',
     'apps.seekers',
     'apps.companies',
+    'apps.ai',
 ]
 
 AUTH_USER_MODEL = 'accounts.UserAccount'
@@ -73,6 +84,8 @@ REST_FRAMEWORK = {
         'register': '5/min',
         'login': '10/min',
         'token_refresh': '20/min',
+        'ai': '30/min',
+        'ai-chat': '10/min',
     },
     'DEFAULT_FILTER_BACKENDS': [
         'django_filters.rest_framework.DjangoFilterBackend',
@@ -104,7 +117,6 @@ SIMPLE_JWT = {
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
     'UPDATE_LAST_LOGIN': True,
-
     'ALGORITHM': 'HS256',
     'SIGNING_KEY': SECRET_KEY,
     'VERIFYING_KEY': None,
@@ -112,23 +124,37 @@ SIMPLE_JWT = {
     'ISSUER': None,
     'JWK_URL': None,
     'LEEWAY': 0,
-
     'AUTH_HEADER_TYPES': ('Bearer',),
     'AUTH_HEADER_NAME': 'HTTP_AUTHORIZATION',
     'USER_ID_FIELD': 'id',
     'USER_ID_CLAIM': 'user_id',
     'USER_AUTHENTICATION_RULE': 'rest_framework_simplejwt.authentication.default_user_authentication_rule',
-
     'AUTH_TOKEN_CLASSES': ('rest_framework_simplejwt.tokens.AccessToken',),
     'TOKEN_TYPE_CLAIM': 'token_type',
     'TOKEN_USER_CLASS': 'rest_framework_simplejwt.models.TokenUser',
-
     'JTI_CLAIM': 'jti',
-
     'SLIDING_TOKEN_REFRESH_EXP_CLAIM': 'refresh_exp',
     'SLIDING_TOKEN_LIFETIME': timedelta(minutes=5),
     'SLIDING_TOKEN_REFRESH_LIFETIME': timedelta(days=1),
 }
+
+# Refresh-token cookie — httpOnly so JS never sees it; access token still
+# travels in the JSON response body. Scoped to the accounts path since only
+# login/register/token-refresh/logout ever need to read or clear it.
+AUTH_REFRESH_COOKIE = {
+    "NAME": "refresh_token",
+    "PATH": "/api/v1/accounts/",  # scoped: only auth endpoints ever receive it
+    "SAMESITE": "Lax",
+    "HTTPONLY": True,
+    "MAX_AGE": int(SIMPLE_JWT["REFRESH_TOKEN_LIFETIME"].total_seconds()),  # derive, don't hardcode
+}
+
+# Env-differing (development/test override to False, production restates
+# True). Defaulted here so any settings module built on base resolves it —
+# without a base default the first auth request raises AttributeError -> 500,
+# and on token/refresh/ that strands the client. Secure-by-default: a module
+# that forgets to override gets the safe value, not the unsafe one.
+AUTH_REFRESH_COOKIE_SECURE = True
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -232,6 +258,15 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.1/howto/static-files/
 
 STATIC_URL = 'static/'
+
+# Guards apps.ai.checkpointer.get_checkpointer(): when True, calling it
+# without a test having first patched it raises AssertionError instead of
+# silently opening a real Postgres pool against config.DB_NAME. That name is
+# a module constant Django's test runner does not rewrite to test_<db> the
+# way it rewrites DATABASES, so an unpatched call during the test suite would
+# otherwise reach the developer's real database. Off everywhere except
+# test.py — production and development legitimately want the real pool.
+AI_BLOCK_REAL_CHECKPOINTER = False
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field

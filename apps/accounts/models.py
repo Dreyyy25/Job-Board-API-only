@@ -7,13 +7,10 @@ from .managers import UserAccountManager
 
 
 class UserAccount(AbstractBaseUser, PermissionsMixin):
-    USER_TYPE_CHOICES = [
-        ('job_seeker', 'Job Seeker'),
-        ('company', 'Company')
-    ]
-    
+    USER_TYPE_CHOICES = [('job_seeker', 'Job Seeker'), ('company', 'Company')]
+
     SEX_CHOICES = [('M', 'Male'), ('F', 'Female'), ('Other', 'Other')]
-    
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user_type = models.CharField(max_length=100, choices=USER_TYPE_CHOICES, null=False, blank=False)
     email = models.EmailField(max_length=100, unique=True, null=False, blank=False)
@@ -23,15 +20,15 @@ class UserAccount(AbstractBaseUser, PermissionsMixin):
     user_image_url = models.URLField(max_length=500, blank=True)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     is_active = models.BooleanField(default=True)
     is_staff = models.BooleanField(default=False)
 
     objects = UserAccountManager()
-    
+
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = ['user_type']
-    
+
     class Meta:
         db_table = 'accounts_useraccount'
         verbose_name = 'User Account'
@@ -40,14 +37,14 @@ class UserAccount(AbstractBaseUser, PermissionsMixin):
         indexes = [
             models.Index(fields=['user_type'], name='useracct_user_type_idx'),
         ]
-    
+
     def __str__(self):
         return self.email
-    
+
     def get_full_name(self):
         """Return the email as full name"""
         return self.email
-    
+
     def get_short_name(self):
         """Return the email as short name"""
         return self.email

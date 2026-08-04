@@ -10,7 +10,8 @@ class CompanyQuerySet(models.QuerySet):
 
     def with_related(self):
         return self.select_related(
-            'user_account', 'business_stream',
+            'user_account',
+            'business_stream',
         ).prefetch_related('images')
 
 

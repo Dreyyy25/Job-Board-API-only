@@ -11,30 +11,32 @@ from .managers import (
     JobPostSkillSetQuerySet,
 )
 
+
 # Create your models here.
 class JobType(models.Model):
     """Job types like Full-time, Part-time, Contract, etc."""
-    
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     job_type_name = models.CharField(max_length=100, unique=True)
     description = models.TextField(blank=True)
-    
+
     def __str__(self):
         return self.job_type_name
-    
+
     class Meta:
         ordering = ['job_type_name']
 
+
 class JobLocation(models.Model):
     """Location details for job posts"""
-    
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     street_address = models.CharField(max_length=200, blank=True)
     city = models.CharField(max_length=100)
     country = models.CharField(max_length=100)
     zip = models.CharField(max_length=20, blank=True)
     country_code = models.CharField(max_length=5, blank=True)
-    
+
     def __str__(self):
         return f"{self.city}, {self.country}"
 
@@ -44,23 +46,20 @@ class JobLocation(models.Model):
             models.Index(fields=['country', 'city'], name='joblocation_country_city_idx'),
         ]
 
+
 class JobPost(models.Model):
     """Main job posting model"""
-    
-    SALARY_TYPE_CHOICES = [
-        ('hourly', 'Hourly'),
-        ('monthly', 'Monthly'),
-        ('yearly', 'Yearly')
-    ]
-    
+
+    SALARY_TYPE_CHOICES = [('hourly', 'Hourly'), ('monthly', 'Monthly'), ('yearly', 'Yearly')]
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='job_posts')
     job_type = models.ForeignKey(JobType, on_delete=models.CASCADE)
     job_location = models.ForeignKey(JobLocation, on_delete=models.CASCADE)
-    
+
     job_title = models.CharField(max_length=200)
     job_description = models.TextField()
-    
+
     job_description_hidden = models.TextField(blank=True)
     salary_min = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     salary_max = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
@@ -105,21 +104,22 @@ class JobPost(models.Model):
             ),
         ]
 
+
 class JobPostActivity(models.Model):
     """Job applications from seekers"""
-    
+
     APPLICATION_STATUS_CHOICES = [
         ('pending', 'Pending'),
         ('reviewed', 'Reviewed'),
         ('accepted', 'Accepted'),
         ('rejected', 'Rejected'),
-        ('withdrawn', 'Withdrawn')
+        ('withdrawn', 'Withdrawn'),
     ]
-    
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user_account = models.ForeignKey(UserAccount, on_delete=models.CASCADE, related_name='job_applications')
     job_post = models.ForeignKey(JobPost, on_delete=models.CASCADE, related_name='applications')
-    
+
     application_date = models.DateTimeField(default=timezone.now)
     application_status = models.CharField(max_length=20, choices=APPLICATION_STATUS_CHOICES, default='pending')
     cover_letter = models.TextField(blank=True)
@@ -129,7 +129,7 @@ class JobPostActivity(models.Model):
 
     def __str__(self):
         return f"{self.user_account.email} applied for {self.job_post.job_title}"
-    
+
     class Meta:
         ordering = ['-application_date']
         unique_together = ['user_account', 'job_post']
@@ -144,16 +144,17 @@ class JobPostActivity(models.Model):
             ),
         ]
 
+
 class JobPostSkillSet(models.Model):
     """Skills required for specific job posts"""
-    
+
     SKILL_LEVEL_CHOICES = [
         ('Beginner', 'Beginner'),
         ('Intermediate', 'Intermediate'),
         ('Advanced', 'Advanced'),
-        ('Expert', 'Expert')
+        ('Expert', 'Expert'),
     ]
-    
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     job_post = models.ForeignKey(JobPost, on_delete=models.CASCADE, related_name='required_skills')
     skill_set = models.ForeignKey(SkillSet, on_delete=models.CASCADE)
@@ -165,6 +166,6 @@ class JobPostSkillSet(models.Model):
     def __str__(self):
         required = "Required" if self.is_required else "Optional"
         return f"{self.job_post.job_title} - {self.skill_set.skill_name} ({self.skill_level}) - {required}"
-    
+
     class Meta:
         unique_together = ['job_post', 'skill_set']

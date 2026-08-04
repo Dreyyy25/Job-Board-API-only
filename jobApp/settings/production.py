@@ -1,4 +1,5 @@
 """Production settings — strict defaults, fail-fast on misconfiguration."""
+
 import os
 
 import config
@@ -14,11 +15,7 @@ CSRF_TRUSTED_ORIGINS = config.CSRF_TRUSTED_ORIGINS
 SECURE_PROXY_SSL_HEADER = config.SECURE_PROXY_SSL_HEADER
 
 # Prod-safe defaults: on unless env explicitly turns them off.
-SECURE_SSL_REDIRECT = (
-    config.SECURE_SSL_REDIRECT
-    if "SECURE_SSL_REDIRECT" in os.environ
-    else True
-)
+SECURE_SSL_REDIRECT = config.SECURE_SSL_REDIRECT if "SECURE_SSL_REDIRECT" in os.environ else True
 SECURE_HSTS_SECONDS = config.SECURE_HSTS_SECONDS or 31536000
 SECURE_HSTS_INCLUDE_SUBDOMAINS = config.SECURE_HSTS_INCLUDE_SUBDOMAINS
 SECURE_HSTS_PRELOAD = config.SECURE_HSTS_PRELOAD
@@ -26,13 +23,14 @@ SECURE_HSTS_PRELOAD = config.SECURE_HSTS_PRELOAD
 # Hardcoded True — cookies over HTTPS only.
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
+# Cross-domain deploys additionally need SameSite=None + pinned
+# CORS_ALLOWED_ORIGINS — future hardening, not now.
+AUTH_REFRESH_COOKIE_SECURE = True
 
 # Fail-fast on misconfiguration. Clearer than a silent bad-deploy.
 assert not DEBUG, "DEBUG must be False in production"
 assert ALLOWED_HOSTS, "ALLOWED_HOSTS must not be empty in production"
-assert SECRET_KEY and len(SECRET_KEY) >= 50, (
-    "SECRET_KEY must be at least 50 chars in production"
-)
+assert SECRET_KEY and len(SECRET_KEY) >= 50, "SECRET_KEY must be at least 50 chars in production"
 
 # Minimal stderr logging — structured logging / Sentry come later.
 LOGGING = {

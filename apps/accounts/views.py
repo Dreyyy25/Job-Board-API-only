@@ -1,5 +1,9 @@
+from django.conf import settings
 from django.contrib.auth.hashers import make_password
-from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.exceptions import (
+    ObjectDoesNotExist,
+    ValidationError as DjangoValidationError,
+)
 from drf_spectacular.utils import (
     OpenApiResponse,
     extend_schema,
@@ -7,22 +11,30 @@ from drf_spectacular.utils import (
 )
 from rest_framework import serializers as drf_serializers
 from rest_framework import viewsets, status
-from rest_framework.decorators import api_view, permission_classes, throttle_classes
-from rest_framework.throttling import AnonRateThrottle
+from rest_framework.decorators import (
+    api_view,
+    parser_classes,
+    permission_classes,
+    throttle_classes,
+)
+from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle
+from rest_framework.parsers import JSONParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
+from rest_framework_simplejwt.views import TokenRefreshView
 
 from . import services
 from .models import UserAccount
 from .serializers import UserAccountSerializer, RegisterSerializer
 from .authentication import CustomJWTAuthentication
+from .cookies import delete_refresh_cookie, set_refresh_cookie
 from .permissions import IsOwnerOrAdmin
 
 
 _TokensSerializer = inline_serializer(
     name='AuthTokens',
     fields={
-        'refresh': drf_serializers.CharField(),
         'access': drf_serializers.CharField(),
     },
 )
@@ -55,14 +67,19 @@ _LoginRequestSerializer = inline_serializer(
     },
 )
 
-_LogoutRequestSerializer = inline_serializer(
-    name='LogoutRequest',
-    fields={'refresh': drf_serializers.CharField()},
-)
-
 _ErrorSerializer = inline_serializer(
     name='ErrorResponse',
     fields={'error': drf_serializers.CharField()},
+)
+
+_RefreshResponseSerializer = inline_serializer(
+    name='TokenRefreshResponse',
+    fields={'access': drf_serializers.CharField()},
+)
+
+_RefreshErrorSerializer = inline_serializer(
+    name='TokenRefreshError',
+    fields={'detail': drf_serializers.CharField()},
 )
 
 
@@ -73,10 +90,12 @@ class RegisterThrottle(AnonRateThrottle):
 class LoginThrottle(AnonRateThrottle):
     scope = 'login'
 
+
 # Create your views here.
 # ViewSets for CRUD operations
 class UserAccountViewSet(viewsets.ModelViewSet):
     """API for managing user accounts"""
+
     queryset = UserAccount.objects.all()
     serializer_class = UserAccountSerializer
     permission_classes = [IsAuthenticated, IsOwnerOrAdmin]
@@ -89,14 +108,14 @@ class UserAccountViewSet(viewsets.ModelViewSet):
         - Regular users only see their own account
         """
         user = self.request.user
-        
+
         # Admins can see all accounts
         if user.is_staff or user.is_superuser:
             return UserAccount.objects.all()
-        
+
         # Regular users only see their own account
         return UserAccount.objects.filter(id=user.id)
-    
+
     def perform_create(self, serializer):
         """Override create to hash password"""
         password = serializer.validated_data.get('password')
@@ -104,7 +123,7 @@ class UserAccountViewSet(viewsets.ModelViewSet):
             serializer.save(password=make_password(password))
         else:
             serializer.save()
-    
+
     def perform_update(self, serializer):
         """Override update to hash password if provided"""
         password = serializer.validated_data.get('password')
@@ -112,6 +131,7 @@ class UserAccountViewSet(viewsets.ModelViewSet):
             serializer.save(password=make_password(password))
         else:
             serializer.save()
+
 
 # Registration endpoint
 def _serialize_profile(user):
@@ -123,10 +143,12 @@ def _serialize_profile(user):
     """
     if user.user_type == 'job_seeker':
         from apps.seekers.serializers import SeekerProfileSerializer
+
         profile = getattr(user, 'seeker_profile', None)
         return SeekerProfileSerializer(profile).data if profile else None
     if user.user_type == 'company':
         from apps.companies.serializers import CompanySerializer
+
         profile = getattr(user, 'company_profile', None)
         return CompanySerializer(profile).data if profile else None
     return None
@@ -144,8 +166,17 @@ def _serialize_profile(user):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 @throttle_classes([RegisterThrottle])
+@parser_classes([JSONParser])
 def register(request):
-    """Register a new user account."""
+    """Register a new user account (JSON bodies only).
+
+    JSON-only is a login-CSRF mitigation: this view is AllowAny, DRF wraps
+    `@api_view` in `csrf_exempt`, and it sets an httpOnly refresh cookie.
+    Accepting form/multipart bodies would let a cross-site HTML form plant
+    an attacker's refresh token in the victim's browser. HTML forms cannot
+    send `application/json`, and a cross-site fetch that does triggers a
+    CORS preflight that fails.
+    """
     serializer = RegisterSerializer(data=request.data)
     if not serializer.is_valid():
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -156,23 +187,27 @@ def register(request):
             email=data['email'],
             password=data['password'],
             user_type=data['user_type'],
-            **{k: v for k, v in data.items()
-               if k not in {'email', 'password', 'user_type'}},
+            **{k: v for k, v in data.items() if k not in {'email', 'password', 'user_type'}},
         )
     except DjangoValidationError as e:
-        return Response({'password': list(e.messages)},
-                        status=status.HTTP_400_BAD_REQUEST)
+        return Response({'password': list(e.messages)}, status=status.HTTP_400_BAD_REQUEST)
 
-    return Response({
-        'message': 'User created successfully',
-        'user': {
-            'id': str(user.id),
-            'email': user.email,
-            'user_type': user.user_type,
+    refresh_token = tokens.pop('refresh')
+    response = Response(
+        {
+            'message': 'User created successfully',
+            'user': {
+                'id': str(user.id),
+                'email': user.email,
+                'user_type': user.user_type,
+            },
+            'tokens': tokens,
+            'profile': _serialize_profile(user),
         },
-        'tokens': tokens,
-        'profile': _serialize_profile(user),
-    }, status=status.HTTP_201_CREATED)
+        status=status.HTTP_201_CREATED,
+    )
+    set_refresh_cookie(response, refresh_token)
+    return response
 
 
 # Login endpoint
@@ -189,30 +224,40 @@ def register(request):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 @throttle_classes([LoginThrottle])
+@parser_classes([JSONParser])
 def login(request):
-    """Login for UserAccount model."""
+    """Login for UserAccount model (JSON bodies only).
+
+    See `register` — JSON-only closes the login-CSRF / refresh-cookie
+    fixation hole on this AllowAny, csrf-exempt, cookie-setting view.
+    """
     email = request.data.get('email')
     password = request.data.get('password')
 
     if not email or not password:
-        return Response({'error': 'Email and password are required'},
-                        status=status.HTTP_400_BAD_REQUEST)
+        return Response({'error': 'Email and password are required'}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
         user, tokens = services.login_user(email, password)
     except services.InvalidCredentialsError:
-        return Response({'error': 'Invalid credentials'},
-                        status=status.HTTP_401_UNAUTHORIZED)
+        return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
 
-    return Response({
-        'message': 'Login successful',
-        'user': {
-            'id': str(user.id),
-            'email': user.email,
-            'user_type': user.user_type,
+    refresh_token = tokens.pop('refresh')
+    response = Response(
+        {
+            'message': 'Login successful',
+            'user': {
+                'id': str(user.id),
+                'email': user.email,
+                'user_type': user.user_type,
+            },
+            'tokens': tokens,
         },
-        'tokens': tokens,
-    }, status=status.HTTP_200_OK)
+        status=status.HTTP_200_OK,
+    )
+    set_refresh_cookie(response, refresh_token)
+    return response
+
 
 # Current user's account endpoint
 @extend_schema(
@@ -231,15 +276,15 @@ def login(request):
 def me(request):
     """Get or update current user's account"""
     user = request.user
-    
+
     if request.method == 'GET':
         serializer = UserAccountSerializer(user)
         return Response(serializer.data)
-    
+
     elif request.method in ['PUT', 'PATCH']:
         partial = request.method == 'PATCH'
         serializer = UserAccountSerializer(user, data=request.data, partial=partial)
-        
+
         if serializer.is_valid():
             # Hash password if provided
             password = serializer.validated_data.get('password')
@@ -250,9 +295,10 @@ def me(request):
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+
 # Logout endpoint
 @extend_schema(
-    request=_LogoutRequestSerializer,
+    request=None,
     responses={
         205: OpenApiResponse(description='Token blacklisted'),
         400: _ErrorSerializer,
@@ -262,11 +308,68 @@ def me(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def logout(request):
-    """Blacklist the supplied refresh token."""
+    """Blacklist the refresh token cookie and clear it."""
+    cookie_name = settings.AUTH_REFRESH_COOKIE['NAME']
+    refresh_token = request.COOKIES.get(cookie_name)
     try:
-        services.logout_user(request.data.get('refresh'))
+        services.logout_user(refresh_token)
     except services.InvalidTokenError as e:
         msg = str(e) or 'invalid or expired refresh token'
-        return Response({'error': msg},
-                        status=status.HTTP_400_BAD_REQUEST)
-    return Response(status=status.HTTP_205_RESET_CONTENT)
+        response = Response({'error': msg}, status=status.HTTP_400_BAD_REQUEST)
+        delete_refresh_cookie(response)
+        return response
+    response = Response(status=status.HTTP_205_RESET_CONTENT)
+    delete_refresh_cookie(response)
+    return response
+
+
+# Token refresh endpoint
+class CookieTokenRefreshView(TokenRefreshView):
+    """Reads the refresh token from the httpOnly cookie (never the body)
+    and writes the rotated refresh token back to that same cookie.
+
+    ROTATE_REFRESH_TOKENS / BLACKLIST_AFTER_ROTATION are enabled in
+    SIMPLE_JWT, so TokenRefreshSerializer.validated_data comes back with
+    both `access` and `refresh` — we move `refresh` into the cookie and
+    keep only `access` in the response body.
+    """
+
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'token_refresh'
+
+    @extend_schema(
+        request=None,
+        responses={
+            200: _RefreshResponseSerializer,
+            401: _RefreshErrorSerializer,
+            429: OpenApiResponse(description='Rate limited'),
+        },
+        tags=['accounts'],
+    )
+    def post(self, request, *args, **kwargs):
+        cookie_name = settings.AUTH_REFRESH_COOKIE['NAME']
+        refresh_token = request.COOKIES.get(cookie_name)
+        if not refresh_token:
+            return Response(
+                {'detail': 'Refresh token cookie not found.'},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        serializer = self.get_serializer(data={'refresh': refresh_token})
+        try:
+            serializer.is_valid(raise_exception=True)
+        except TokenError as e:
+            raise InvalidToken(e.args[0]) from e
+        except ObjectDoesNotExist as e:
+            # simplejwt's TokenRefreshSerializer.validate looks the user up
+            # with an unguarded .get(), so a signature-valid token whose user
+            # row was deleted raises DoesNotExist — not TokenError — and DRF
+            # would render it as a 500. A vanished user is an invalid token.
+            raise InvalidToken() from e
+
+        data = dict(serializer.validated_data)
+        rotated_refresh = data.pop('refresh', None)
+        response = Response(data, status=status.HTTP_200_OK)
+        if rotated_refresh:
+            set_refresh_cookie(response, rotated_refresh)
+        return response

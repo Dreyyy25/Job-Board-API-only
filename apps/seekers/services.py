@@ -1,4 +1,5 @@
 """Service layer for the seekers app."""
+
 from .models import EducationData, ExperienceData, SeekerProfile, SeekerSkillSet
 
 
@@ -23,9 +24,7 @@ def build_seeker_dashboard(requester, user_id):
     is_company = getattr(requester, 'user_type', None) == 'company'
 
     if not (is_owner or is_admin or is_company):
-        raise DashboardPermissionError(
-            'You do not have permission to access this dashboard'
-        )
+        raise DashboardPermissionError('You do not have permission to access this dashboard')
 
     try:
         profile = SeekerProfile.objects.with_related().get(user_account_id=user_id)
@@ -39,6 +38,7 @@ def build_seeker_dashboard(requester, user_id):
         SeekerProfileSerializer,
         SeekerSkillSetSerializer,
     )
+
     education = EducationData.objects.for_user(profile.user_account).with_related()
     experience = ExperienceData.objects.for_user(profile.user_account).with_related()
     skills = SeekerSkillSet.objects.for_user(profile.user_account).with_related()

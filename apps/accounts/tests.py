@@ -1,3 +1,8 @@
+from urllib.parse import urlencode
+
+from django.conf import settings as django_settings
+from django.core.cache import cache
+from django.test import override_settings
 from rest_framework.test import APITestCase
 from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -37,9 +42,9 @@ class RegisterHardeningTests(APITestCase):
         return base
 
     def test_register_ignores_is_staff_flag(self):
-        r = self.client.post("/api/v1/accounts/register/",
-                             self._payload(is_staff=True, is_superuser=True),
-                             format="json")
+        r = self.client.post(
+            "/api/v1/accounts/register/", self._payload(is_staff=True, is_superuser=True), format="json"
+        )
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
         user = UserAccount.objects.get(email="newuser@example.com")
         self.assertFalse(user.is_staff)
@@ -63,17 +68,13 @@ class MePatchTests(APITestCase):
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
 
     def test_me_patch_rejects_is_staff_escalation(self):
-        r = self.client.patch("/api/v1/accounts/me/",
-                              {"is_staff": True, "is_superuser": True},
-                              format="json")
+        self.client.patch("/api/v1/accounts/me/", {"is_staff": True, "is_superuser": True}, format="json")
         self.user.refresh_from_db()
         self.assertFalse(self.user.is_staff)
         self.assertFalse(self.user.is_superuser)
 
     def test_me_patch_rejects_user_type_change(self):
-        r = self.client.patch("/api/v1/accounts/me/",
-                              {"user_type": "company"},
-                              format="json")
+        r = self.client.patch("/api/v1/accounts/me/", {"user_type": "company"}, format="json")
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
         self.user.refresh_from_db()
         self.assertEqual(self.user.user_type, "job_seeker")
@@ -88,31 +89,301 @@ class MePatchTests(APITestCase):
         self.assertEqual(r.status_code, status.HTTP_404_NOT_FOUND)
 
 
-class LogoutTests(APITestCase):
-    def setUp(self):
-        self.user = UserAccount.objects.create_user(
-            email="logout@example.com",
+class CookieAuthTests(APITestCase):
+    """Refresh tokens move to an httpOnly cookie; body keeps only access."""
+
+    def _assert_refresh_cookie_set(self, response):
+        cookie_conf = django_settings.AUTH_REFRESH_COOKIE
+        name = cookie_conf["NAME"]
+        self.assertIn(name, response.cookies, f"Expected {name!r} cookie in response")
+        morsel = response.cookies[name]
+        self.assertTrue(morsel["httponly"])
+        self.assertEqual(morsel["samesite"], "Lax")
+        self.assertEqual(morsel["path"], "/api/v1/accounts/")
+        self.assertEqual(morsel["max-age"], 604800)  # 7 days
+        self.assertTrue(morsel.value, "Refresh token cookie value is empty")
+
+        self.assertIn("access", response.data["tokens"])
+        self.assertNotIn("refresh", response.data["tokens"])
+
+    def test_register_sets_refresh_cookie_and_omits_it_from_body(self):
+        r = self.client.post(
+            "/api/v1/accounts/register/",
+            {
+                "email": "cookie-register@example.com",
+                "password": "Str0ng-Password!",
+                "user_type": "job_seeker",
+            },
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        self._assert_refresh_cookie_set(r)
+        self.assertEqual(
+            r.data["user"],
+            {
+                "id": r.data["user"]["id"],
+                "email": "cookie-register@example.com",
+                "user_type": "job_seeker",
+            },
+        )
+
+    def test_login_sets_refresh_cookie_and_omits_it_from_body(self):
+        UserAccount.objects.create_user(
+            email="cookie-login@example.com",
             password="Str0ng-Password!",
             user_type="job_seeker",
         )
-        self.refresh = RefreshToken.for_user(self.user)
-        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {self.refresh.access_token}")
+        r = self.client.post(
+            "/api/v1/accounts/login/",
+            {
+                "email": "cookie-login@example.com",
+                "password": "Str0ng-Password!",
+            },
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self._assert_refresh_cookie_set(r)
+        self.assertEqual(
+            r.data["user"],
+            {
+                "id": r.data["user"]["id"],
+                "email": "cookie-login@example.com",
+                "user_type": "job_seeker",
+            },
+        )
 
-    def test_logout_blacklists_refresh_token(self):
-        r = self.client.post("/api/v1/accounts/logout/",
-                             {"refresh": str(self.refresh)}, format="json")
-        self.assertEqual(r.status_code, status.HTTP_205_RESET_CONTENT)
-        self.client.credentials()  # drop auth header
-        r2 = self.client.post("/api/v1/accounts/token/refresh/",
-                              {"refresh": str(self.refresh)}, format="json")
+    def _login_for_cookie(self, email="cookie-secure@example.com"):
+        UserAccount.objects.create_user(
+            email=email,
+            password="Str0ng-Password!",
+            user_type="job_seeker",
+        )
+        return self.client.post(
+            "/api/v1/accounts/login/",
+            {
+                "email": email,
+                "password": "Str0ng-Password!",
+            },
+            format="json",
+        )
+
+    @override_settings(AUTH_REFRESH_COOKIE_SECURE=True)
+    def test_refresh_cookie_is_secure_when_setting_is_true(self):
+        """`Secure` must track AUTH_REFRESH_COOKIE_SECURE (prod: True).
+
+        Test settings pin the flag to False, so without this test dropping
+        `secure=` from set_refresh_cookie would stay green while prod
+        served the refresh cookie over plain HTTP.
+        """
+        r = self._login_for_cookie("cookie-secure-on@example.com")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        name = django_settings.AUTH_REFRESH_COOKIE["NAME"]
+        self.assertTrue(
+            r.cookies[name]["secure"],
+            "Refresh cookie missing Secure with AUTH_REFRESH_COOKIE_SECURE=True",
+        )
+
+    @override_settings(AUTH_REFRESH_COOKIE_SECURE=False)
+    def test_refresh_cookie_is_not_secure_when_setting_is_false(self):
+        """The dev half of the same contract — plain HTTP localhost works."""
+        r = self._login_for_cookie("cookie-secure-off@example.com")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        name = django_settings.AUTH_REFRESH_COOKIE["NAME"]
+        self.assertFalse(r.cookies[name]["secure"])
+
+    def test_refresh_rotates_cookie_and_blacklists_old_token(self):
+        name = django_settings.AUTH_REFRESH_COOKIE["NAME"]
+        user = UserAccount.objects.create_user(
+            email="cookie-refresh@example.com",
+            password="Str0ng-Password!",
+            user_type="job_seeker",
+        )
+        old_refresh = RefreshToken.for_user(user)
+        self.client.cookies[name] = str(old_refresh)
+
+        r = self.client.post("/api/v1/accounts/token/refresh/", {}, format="json")
+
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertIn("access", r.data)
+        self.assertNotIn("refresh", r.data)
+
+        self.assertIn(name, r.cookies)
+        new_refresh_value = r.cookies[name].value
+        self.assertTrue(new_refresh_value)
+        self.assertNotEqual(new_refresh_value, str(old_refresh))
+
+        # The refreshed access token must actually authenticate. This is what
+        # the SPA runs on after every bootstrap, and CustomJWTAuthentication
+        # loads the user from the custom `user_id` claim — asserting only that
+        # 'access' is present would not catch a claim/lookup mismatch.
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {r.data['access']}")
+        me = self.client.get("/api/v1/accounts/me/")
+        self.assertEqual(me.status_code, status.HTTP_200_OK)
+        self.assertEqual(me.data["email"], "cookie-refresh@example.com")
+        self.client.credentials()
+
+        # Replaying the old (now-rotated) refresh token must be rejected —
+        # proves BLACKLIST_AFTER_ROTATION actually ran, not just that a new
+        # token was minted.
+        self.client.cookies[name] = str(old_refresh)
+        r2 = self.client.post("/api/v1/accounts/token/refresh/", {}, format="json")
         self.assertEqual(r2.status_code, status.HTTP_401_UNAUTHORIZED)
 
-    def test_logout_missing_refresh_returns_400(self):
-        r = self.client.post("/api/v1/accounts/logout/", {}, format="json")
+    def test_refresh_without_cookie_returns_401(self):
+        r = self.client.post("/api/v1/accounts/token/refresh/", {}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertIn("detail", r.data)
+
+    def test_refresh_with_deleted_user_returns_401_not_500(self):
+        """A signature-valid token whose user row is gone must 401.
+
+        simplejwt's TokenRefreshSerializer.validate does an unguarded
+        `get_user_model().objects.get(...)`, which raises
+        UserAccount.DoesNotExist (not a TokenError) — DRF's default
+        handler would turn that into a 500. Users can DELETE their own
+        account, and the 7-day cookie keeps auto-attaching the stale
+        token afterwards, so the SPA hits this on every bootstrap.
+        """
+        name = django_settings.AUTH_REFRESH_COOKIE["NAME"]
+        user = UserAccount.objects.create_user(
+            email="deleted-user@example.com",
+            password="Str0ng-Password!",
+            user_type="job_seeker",
+        )
+        refresh = RefreshToken.for_user(user)
+        self.client.cookies[name] = str(refresh)
+        user.delete()
+
+        r = self.client.post("/api/v1/accounts/token/refresh/", {}, format="json")
+
+        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertIn("detail", r.data)
+
+    def test_logout_with_cookie_blacklists_and_clears_cookie(self):
+        name = django_settings.AUTH_REFRESH_COOKIE["NAME"]
+        user = UserAccount.objects.create_user(
+            email="cookie-logout@example.com",
+            password="Str0ng-Password!",
+            user_type="job_seeker",
+        )
+        refresh = RefreshToken.for_user(user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+        self.client.cookies[name] = str(refresh)
+
+        r = self.client.post("/api/v1/accounts/logout/", format="json")
+
+        self.assertEqual(r.status_code, status.HTTP_205_RESET_CONTENT)
+        self.assertIn(name, r.cookies)
+        self.assertEqual(r.cookies[name].value, "")
+        self.assertEqual(r.cookies[name]["max-age"], 0)
+
+        # Blacklisted at logout — a refresh with the same token must 401.
+        self.client.credentials()
+        self.client.cookies[name] = str(refresh)
+        r2 = self.client.post("/api/v1/accounts/token/refresh/", {}, format="json")
+        self.assertEqual(r2.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_logout_without_cookie_returns_400(self):
+        user = UserAccount.objects.create_user(
+            email="cookie-logout-missing@example.com",
+            password="Str0ng-Password!",
+            user_type="job_seeker",
+        )
+        refresh = RefreshToken.for_user(user)
+        self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+
+        r = self.client.post("/api/v1/accounts/logout/", format="json")
+
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("error", r.data)
+        # Defensive clear even on failure.
+        name = django_settings.AUTH_REFRESH_COOKIE["NAME"]
+        self.assertIn(name, r.cookies)
+        self.assertEqual(r.cookies[name].value, "")
 
 
-from django.core.cache import cache
+class JsonOnlyAuthEndpointTests(APITestCase):
+    """login/register accept JSON only — login-CSRF mitigation.
+
+    Both are AllowAny `@api_view` FBVs, which DRF wraps in `csrf_exempt`,
+    and both now SET an httpOnly refresh cookie. If they parsed
+    form-encoded bodies, a cross-site HTML `<form method="POST">` could
+    plant an attacker's refresh token in the victim's browser (session
+    fixation). HTML forms cannot send `application/json`, and a
+    cross-site `fetch` with that content type triggers a CORS preflight
+    that fails, so rejecting non-JSON bodies closes the hole.
+    """
+
+    def setUp(self):
+        cache.clear()
+        self.cookie_name = django_settings.AUTH_REFRESH_COOKIE["NAME"]
+
+    def _post_form(self, url, payload):
+        return self.client.post(
+            url,
+            urlencode(payload),
+            content_type="application/x-www-form-urlencoded",
+        )
+
+    def test_login_rejects_form_encoded_body(self):
+        UserAccount.objects.create_user(
+            email="form-login@example.com",
+            password="Str0ng-Password!",
+            user_type="job_seeker",
+        )
+        r = self._post_form(
+            "/api/v1/accounts/login/",
+            {
+                "email": "form-login@example.com",
+                "password": "Str0ng-Password!",
+            },
+        )
+        self.assertEqual(r.status_code, status.HTTP_415_UNSUPPORTED_MEDIA_TYPE)
+        self.assertNotIn(self.cookie_name, r.cookies)
+
+    def test_register_rejects_form_encoded_body(self):
+        r = self._post_form(
+            "/api/v1/accounts/register/",
+            {
+                "email": "form-register@example.com",
+                "password": "Str0ng-Password!",
+                "user_type": "job_seeker",
+            },
+        )
+        self.assertEqual(r.status_code, status.HTTP_415_UNSUPPORTED_MEDIA_TYPE)
+        self.assertNotIn(self.cookie_name, r.cookies)
+        self.assertFalse(UserAccount.objects.filter(email="form-register@example.com").exists())
+
+    def test_login_rejects_multipart_body(self):
+        UserAccount.objects.create_user(
+            email="mp-login@example.com",
+            password="Str0ng-Password!",
+            user_type="job_seeker",
+        )
+        r = self.client.post(
+            "/api/v1/accounts/login/",
+            {
+                "email": "mp-login@example.com",
+                "password": "Str0ng-Password!",
+            },
+            format="multipart",
+        )
+        self.assertEqual(r.status_code, status.HTTP_415_UNSUPPORTED_MEDIA_TYPE)
+        self.assertNotIn(self.cookie_name, r.cookies)
+
+    def test_register_rejects_multipart_body(self):
+        r = self.client.post(
+            "/api/v1/accounts/register/",
+            {
+                "email": "mp-register@example.com",
+                "password": "Str0ng-Password!",
+                "user_type": "job_seeker",
+            },
+            format="multipart",
+        )
+        self.assertEqual(r.status_code, status.HTTP_415_UNSUPPORTED_MEDIA_TYPE)
+        self.assertNotIn(self.cookie_name, r.cookies)
+        self.assertFalse(UserAccount.objects.filter(email="mp-register@example.com").exists())
 
 
 class ThrottleTests(APITestCase):
@@ -125,21 +396,26 @@ class ThrottleTests(APITestCase):
     def test_register_throttles_after_limit(self):
         url = "/api/v1/accounts/register/"
         for i in range(5):
-            r = self.client.post(url, {
-                "email": f"thr{i}@example.com",
+            r = self.client.post(
+                url,
+                {
+                    "email": f"thr{i}@example.com",
+                    "password": "Str0ng-Password!",
+                    "user_type": "job_seeker",
+                },
+                format="json",
+            )
+            self.assertIn(r.status_code, (status.HTTP_201_CREATED, status.HTTP_400_BAD_REQUEST))
+        r6 = self.client.post(
+            url,
+            {
+                "email": "thr6@example.com",
                 "password": "Str0ng-Password!",
                 "user_type": "job_seeker",
-            }, format="json")
-            self.assertIn(r.status_code, (status.HTTP_201_CREATED, status.HTTP_400_BAD_REQUEST))
-        r6 = self.client.post(url, {
-            "email": "thr6@example.com",
-            "password": "Str0ng-Password!",
-            "user_type": "job_seeker",
-        }, format="json")
+            },
+            format="json",
+        )
         self.assertEqual(r6.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
-
-
-from django.test import override_settings
 
 
 @override_settings(
@@ -153,8 +429,7 @@ class CorsTests(APITestCase):
             HTTP_ORIGIN="http://localhost:3000",
             HTTP_ACCESS_CONTROL_REQUEST_METHOD="POST",
         )
-        self.assertEqual(r.headers.get("Access-Control-Allow-Origin"),
-                         "http://localhost:3000")
+        self.assertEqual(r.headers.get("Access-Control-Allow-Origin"), "http://localhost:3000")
 
     def test_cors_preflight_from_disallowed_origin(self):
         r = self.client.options(
@@ -186,9 +461,6 @@ class SecurityHeaderTests(APITestCase):
         self.assertIn("max-age=3600", r.headers.get("Strict-Transport-Security", ""))
 
 
-from django.conf import settings as django_settings
-
-
 from unittest.mock import patch
 from apps.companies.models import Company
 from apps.seekers.models import SeekerProfile
@@ -199,21 +471,29 @@ class SignalCreatedProfileTests(APITestCase):
         cache.clear()
 
     def test_registering_seeker_creates_profile(self):
-        r = self.client.post("/api/v1/accounts/register/", {
-            "email": "sig-seeker@example.com",
-            "password": "Str0ng-Password!",
-            "user_type": "job_seeker",
-        }, format="json")
+        r = self.client.post(
+            "/api/v1/accounts/register/",
+            {
+                "email": "sig-seeker@example.com",
+                "password": "Str0ng-Password!",
+                "user_type": "job_seeker",
+            },
+            format="json",
+        )
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
         user = UserAccount.objects.get(email="sig-seeker@example.com")
         self.assertTrue(SeekerProfile.objects.filter(user_account=user).exists())
 
     def test_registering_company_creates_company_row(self):
-        r = self.client.post("/api/v1/accounts/register/", {
-            "email": "sig-co@example.com",
-            "password": "Str0ng-Password!",
-            "user_type": "company",
-        }, format="json")
+        r = self.client.post(
+            "/api/v1/accounts/register/",
+            {
+                "email": "sig-co@example.com",
+                "password": "Str0ng-Password!",
+                "user_type": "company",
+            },
+            format="json",
+        )
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
         user = UserAccount.objects.get(email="sig-co@example.com")
         co = Company.objects.get(user_account=user)
@@ -221,25 +501,29 @@ class SignalCreatedProfileTests(APITestCase):
 
     def test_signal_creates_company_on_create_superuser(self):
         user = UserAccount.objects.create_superuser(
-            email="su@example.com", password="Str0ng-Password!",
+            email="su@example.com",
+            password="Str0ng-Password!",
         )
         self.assertTrue(Company.objects.filter(user_account=user).exists())
 
     def test_signal_creates_seeker_profile_on_create_user(self):
         user = UserAccount.objects.create_user(
-            email="cu-seeker@example.com", password="Str0ng-Password!",
+            email="cu-seeker@example.com",
+            password="Str0ng-Password!",
             user_type="job_seeker",
         )
         self.assertTrue(SeekerProfile.objects.filter(user_account=user).exists())
 
     def test_signal_idempotent_on_resave(self):
         user = UserAccount.objects.create_user(
-            email="idem@example.com", password="Str0ng-Password!",
+            email="idem@example.com",
+            password="Str0ng-Password!",
             user_type="job_seeker",
         )
         user.save()  # re-save
         self.assertEqual(
-            SeekerProfile.objects.filter(user_account=user).count(), 1,
+            SeekerProfile.objects.filter(user_account=user).count(),
+            1,
         )
 
     def test_register_rollback_on_signal_failure(self):
@@ -249,11 +533,15 @@ class SignalCreatedProfileTests(APITestCase):
             side_effect=RuntimeError("boom"),
         ):
             with self.assertRaises(RuntimeError):
-                self.client.post("/api/v1/accounts/register/", {
-                    "email": email,
-                    "password": "Str0ng-Password!",
-                    "user_type": "job_seeker",
-                }, format="json")
+                self.client.post(
+                    "/api/v1/accounts/register/",
+                    {
+                        "email": email,
+                        "password": "Str0ng-Password!",
+                        "user_type": "job_seeker",
+                    },
+                    format="json",
+                )
         self.assertEqual(UserAccount.objects.filter(email=email).count(), 0)
 
     def test_create_user_rollback_on_signal_failure(self):
@@ -264,17 +552,22 @@ class SignalCreatedProfileTests(APITestCase):
         ):
             with self.assertRaises(RuntimeError):
                 UserAccount.objects.create_user(
-                    email=email, password="Str0ng-Password!",
+                    email=email,
+                    password="Str0ng-Password!",
                     user_type="job_seeker",
                 )
         self.assertEqual(UserAccount.objects.filter(email=email).count(), 0)
 
     def test_register_response_includes_seeker_profile(self):
-        r = self.client.post("/api/v1/accounts/register/", {
-            "email": "resp-seeker@example.com",
-            "password": "Str0ng-Password!",
-            "user_type": "job_seeker",
-        }, format="json")
+        r = self.client.post(
+            "/api/v1/accounts/register/",
+            {
+                "email": "resp-seeker@example.com",
+                "password": "Str0ng-Password!",
+                "user_type": "job_seeker",
+            },
+            format="json",
+        )
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
         self.assertIn("profile", r.data)
         self.assertIsNotNone(r.data["profile"])
@@ -282,11 +575,15 @@ class SignalCreatedProfileTests(APITestCase):
         self.assertIn("first_name", r.data["profile"])
 
     def test_register_response_includes_company_profile(self):
-        r = self.client.post("/api/v1/accounts/register/", {
-            "email": "resp-co@example.com",
-            "password": "Str0ng-Password!",
-            "user_type": "company",
-        }, format="json")
+        r = self.client.post(
+            "/api/v1/accounts/register/",
+            {
+                "email": "resp-co@example.com",
+                "password": "Str0ng-Password!",
+                "user_type": "company",
+            },
+            format="json",
+        )
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
         self.assertIn("profile", r.data)
         self.assertIn("company_name", r.data["profile"])
@@ -304,10 +601,12 @@ class Argon2HasherTests(APITestCase):
     We use override_settings here to exercise the real hasher.
     """
 
-    @override_settings(PASSWORD_HASHERS=[
-        'django.contrib.auth.hashers.Argon2PasswordHasher',
-        'django.contrib.auth.hashers.PBKDF2PasswordHasher',
-    ])
+    @override_settings(
+        PASSWORD_HASHERS=[
+            'django.contrib.auth.hashers.Argon2PasswordHasher',
+            'django.contrib.auth.hashers.PBKDF2PasswordHasher',
+        ]
+    )
     def test_new_user_password_stored_with_argon2(self):
         user = UserAccount.objects.create_user(
             email='argon@example.com',
@@ -359,7 +658,8 @@ class AccountsServiceTests(APITestCase):
             user_type="job_seeker",
         )
         user, tokens = services.login_user(
-            "login-svc@example.com", "Str0ng-Password!",
+            "login-svc@example.com",
+            "Str0ng-Password!",
         )
         self.assertEqual(user.email, "login-svc@example.com")
         self.assertIn("access", tokens)
@@ -393,10 +693,14 @@ class FailedLoginLoggingTests(APITestCase):
     def test_failed_login_logs_security_warning_with_hash_not_plaintext(self):
         plaintext_email = "ghost@example.com"
         with self.assertLogs('django.security', level='WARNING') as cm:
-            r = self.client.post('/api/v1/accounts/login/', {
-                'email': plaintext_email,
-                'password': 'wrong',
-            }, format='json')
+            r = self.client.post(
+                '/api/v1/accounts/login/',
+                {
+                    'email': plaintext_email,
+                    'password': 'wrong',
+                },
+                format='json',
+            )
         self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
         log_output = '\n'.join(cm.output)
         self.assertIn('email_hash=', log_output)
@@ -410,10 +714,14 @@ class FailedLoginLoggingTests(APITestCase):
             user_type='job_seeker',
         )
         with self.assertLogs('django.security', level='WARNING') as cm:
-            r = self.client.post('/api/v1/accounts/login/', {
-                'email': 'fl-existing@example.com',
-                'password': 'wrong',
-            }, format='json')
+            r = self.client.post(
+                '/api/v1/accounts/login/',
+                {
+                    'email': 'fl-existing@example.com',
+                    'password': 'wrong',
+                },
+                format='json',
+            )
         self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
         self.assertIn('email_hash=', '\n'.join(cm.output))
 
@@ -424,14 +732,19 @@ class RegisterQueryCountTests(APITestCase):
 
     def test_register_endpoint_prefetches_profile_reasonably(self):
         with CaptureQueriesContext(connection) as ctx:
-            r = self.client.post("/api/v1/accounts/register/", {
-                "email": "qc-reg@example.com",
-                "password": "Str0ng-Password!",
-                "user_type": "job_seeker",
-            }, format="json")
+            r = self.client.post(
+                "/api/v1/accounts/register/",
+                {
+                    "email": "qc-reg@example.com",
+                    "password": "Str0ng-Password!",
+                    "user_type": "job_seeker",
+                },
+                format="json",
+            )
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
         self.assertLessEqual(
-            len(ctx), 20,
+            len(ctx),
+            20,
             f"Register query count {len(ctx)} unexpectedly high",
         )
 

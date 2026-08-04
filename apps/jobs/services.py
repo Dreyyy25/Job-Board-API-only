@@ -3,6 +3,7 @@
 Business logic for applications. Views translate domain exceptions into
 HTTP responses via the exception-to-HTTP map pinned in the Tier 2 spec.
 """
+
 from .models import JobPost, JobPostActivity
 
 
@@ -37,25 +38,28 @@ def apply_for_job(user, job_post_id, cover_letter='', user_account_id=None):
         raise InvalidApplicantError('Only job seekers can apply for jobs')
 
     if user_account_id is None or str(user_account_id) != str(user.id):
-        raise InvalidApplicantError(
-            'You can only apply for jobs for yourself'
-        )
+        raise InvalidApplicantError('You can only apply for jobs for yourself')
 
     try:
         job = JobPost.objects.get(
-            id=job_post_id, is_published=True, is_active=True,
+            id=job_post_id,
+            is_published=True,
+            is_active=True,
         )
     except (JobPost.DoesNotExist, ValueError):
         # ValueError covers malformed UUIDs
         raise JobNotAvailableError()
 
     if JobPostActivity.objects.filter(
-        user_account=user, job_post=job,
+        user_account=user,
+        job_post=job,
     ).exists():
         raise AlreadyAppliedError()
 
     return JobPostActivity.objects.create(
-        user_account=user, job_post=job, cover_letter=cover_letter,
+        user_account=user,
+        job_post=job,
+        cover_letter=cover_letter,
     )
 
 
@@ -69,9 +73,7 @@ def applications_for_job(requester, job_id):
     is_admin = requester.is_staff or requester.is_superuser
     is_owner = job.company.user_account_id == requester.id
     if not (is_admin or is_owner):
-        raise DashboardPermissionError(
-            'You do not have permission to view these applications'
-        )
+        raise DashboardPermissionError('You do not have permission to view these applications')
 
     return JobPostActivity.objects.with_related().filter(job_post_id=job_id)
 
@@ -81,8 +83,6 @@ def applications_for_user(requester, target_user_id):
     is_admin = requester.is_staff or requester.is_superuser
     is_self = str(requester.id) == str(target_user_id)
     if not (is_admin or is_self):
-        raise DashboardPermissionError(
-            'You do not have permission to view these applications'
-        )
+        raise DashboardPermissionError('You do not have permission to view these applications')
 
     return JobPostActivity.objects.with_related().filter(user_account_id=target_user_id)

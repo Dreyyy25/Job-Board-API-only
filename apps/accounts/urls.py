@@ -1,13 +1,8 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from rest_framework_simplejwt.views import TokenRefreshView, TokenVerifyView
-from rest_framework.throttling import ScopedRateThrottle
+from rest_framework_simplejwt.views import TokenVerifyView
+
 from . import views
-
-
-class ThrottledTokenRefreshView(TokenRefreshView):
-    throttle_classes = [ScopedRateThrottle]
-    throttle_scope = 'token_refresh'
 
 
 router = DefaultRouter()
@@ -19,8 +14,7 @@ urlpatterns = [
     path('login/', views.login, name='login'),
     path('logout/', views.logout, name='logout'),
     path('me/', views.me, name='current-user'),
-
-    path('token/refresh/', ThrottledTokenRefreshView.as_view(), name='token-refresh'),
+    path('token/refresh/', views.CookieTokenRefreshView.as_view(), name='token-refresh'),
     path('token/verify/', TokenVerifyView.as_view(), name='token-verify'),
     # path('token/blacklist/', TokenBlacklistView.as_view(), name='token-blacklist'),
 ]

@@ -4,6 +4,7 @@ Registered at import time when drf_spectacular initializes. Imported
 from apps/accounts/apps.py via AccountsConfig.ready() to guarantee that
 spectacular sees the registration before it starts walking views.
 """
+
 from drf_spectacular.extensions import OpenApiAuthenticationExtension
 
 
@@ -14,6 +15,7 @@ class CustomJWTAuthenticationScheme(OpenApiAuthenticationExtension):
     triggers a "could not resolve authenticator" warning at schema
     generation time.
     """
+
     target_class = 'apps.accounts.authentication.CustomJWTAuthentication'
     name = 'jwtAuth'
 

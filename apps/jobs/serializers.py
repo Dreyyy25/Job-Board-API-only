@@ -20,10 +20,21 @@ class JobPostSerializer(serializers.ModelSerializer):
     class Meta:
         model = JobPost
         fields = [
-            'id', 'company', 'job_type', 'job_location',
-            'job_title', 'job_description', 'job_description_hidden',
-            'salary_min', 'salary_max', 'salary_type', 'deadline_date',
-            'is_published', 'is_active', 'created_at', 'updated_at',
+            'id',
+            'company',
+            'job_type',
+            'job_location',
+            'job_title',
+            'job_description',
+            'job_description_hidden',
+            'salary_min',
+            'salary_max',
+            'salary_type',
+            'deadline_date',
+            'is_published',
+            'is_active',
+            'created_at',
+            'updated_at',
         ]
         read_only_fields = ['id', 'company', 'created_at', 'updated_at']
 
@@ -34,11 +45,8 @@ class JobPostSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({'salary_min': 'Must be non-negative.'})
         if salary_max is not None and salary_max < 0:
             raise serializers.ValidationError({'salary_max': 'Must be non-negative.'})
-        if (salary_min is not None and salary_max is not None
-                and salary_min > salary_max):
-            raise serializers.ValidationError(
-                {'salary_min': 'salary_min must be <= salary_max.'}
-            )
+        if salary_min is not None and salary_max is not None and salary_min > salary_max:
+            raise serializers.ValidationError({'salary_min': 'salary_min must be <= salary_max.'})
         return attrs
 
     def to_representation(self, instance):
@@ -46,10 +54,9 @@ class JobPostSerializer(serializers.ModelSerializer):
         request = self.context.get('request')
         user = getattr(request, 'user', None)
         is_owner = bool(
-            user and user.is_authenticated and (
-                user.is_staff or user.is_superuser
-                or instance.company.user_account_id == user.id
-            )
+            user
+            and user.is_authenticated
+            and (user.is_staff or user.is_superuser or instance.company.user_account_id == user.id)
         )
         if not is_owner:
             data.pop('job_description_hidden', None)
@@ -60,8 +67,13 @@ class JobPostActivitySerializer(serializers.ModelSerializer):
     class Meta:
         model = JobPostActivity
         fields = [
-            'id', 'user_account', 'job_post', 'application_date',
-            'application_status', 'cover_letter', 'updated_at',
+            'id',
+            'user_account',
+            'job_post',
+            'application_date',
+            'application_status',
+            'cover_letter',
+            'updated_at',
         ]
         read_only_fields = ['id', 'application_date', 'updated_at']
 

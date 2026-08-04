@@ -2,15 +2,17 @@ from rest_framework.test import APITestCase
 from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
 from apps.accounts.models import UserAccount
-from apps.companies.models import BusinessStream, Company
+from apps.companies.models import BusinessStream
 
 
 class CompanySerializerTests(APITestCase):
     def setUp(self):
         self.owner = UserAccount.objects.create_user(
-            email="owner@example.com", password="Str0ng-Password!", user_type="company")
+            email="owner@example.com", password="Str0ng-Password!", user_type="company"
+        )
         self.other = UserAccount.objects.create_user(
-            email="other@example.com", password="Str0ng-Password!", user_type="company")
+            email="other@example.com", password="Str0ng-Password!", user_type="company"
+        )
         self.stream = BusinessStream.objects.create(business_stream_name="Tech")
         self.company = self.owner.company_profile
         self.company.company_name = "Acme"
@@ -20,7 +22,7 @@ class CompanySerializerTests(APITestCase):
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token.access_token}")
 
     def test_owner_cannot_reassign_user_account(self):
-        r = self.client.patch(
+        self.client.patch(
             f"/api/v1/companies/profile/{self.company.id}/",
             {"user_account": str(self.other.id)},
             format="json",
@@ -32,11 +34,14 @@ class CompanySerializerTests(APITestCase):
 class CompanyPermissionTests(APITestCase):
     def setUp(self):
         self.owner = UserAccount.objects.create_user(
-            email="co-owner@example.com", password="Str0ng-Password!", user_type="company")
+            email="co-owner@example.com", password="Str0ng-Password!", user_type="company"
+        )
         self.other = UserAccount.objects.create_user(
-            email="co-other@example.com", password="Str0ng-Password!", user_type="company")
+            email="co-other@example.com", password="Str0ng-Password!", user_type="company"
+        )
         self.seeker = UserAccount.objects.create_user(
-            email="co-seeker@example.com", password="Str0ng-Password!", user_type="job_seeker")
+            email="co-seeker@example.com", password="Str0ng-Password!", user_type="job_seeker"
+        )
         self.stream = BusinessStream.objects.create(business_stream_name="Finance")
         self.owner_co = self.owner.company_profile
         self.owner_co.company_name = "Owner"
@@ -51,8 +56,8 @@ class CompanyPermissionTests(APITestCase):
         token = RefreshToken.for_user(self.owner)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token.access_token}")
         r = self.client.patch(
-            f"/api/v1/companies/profile/{self.other_co.id}/",
-            {"company_name": "Hacked"}, format="json")
+            f"/api/v1/companies/profile/{self.other_co.id}/", {"company_name": "Hacked"}, format="json"
+        )
         self.assertIn(r.status_code, (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND))
         self.other_co.refresh_from_db()
         self.assertEqual(self.other_co.company_name, "Other")
@@ -60,12 +65,15 @@ class CompanyPermissionTests(APITestCase):
     def test_seeker_cannot_create_company(self):
         token = RefreshToken.for_user(self.seeker)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token.access_token}")
-        r = self.client.post("/api/v1/companies/profile/", {
-            "company_name": "SeekerCo",
-            "business_stream": str(self.stream.id),
-        }, format="json")
-        self.assertIn(r.status_code,
-                      (status.HTTP_403_FORBIDDEN, status.HTTP_400_BAD_REQUEST))
+        r = self.client.post(
+            "/api/v1/companies/profile/",
+            {
+                "company_name": "SeekerCo",
+                "business_stream": str(self.stream.id),
+            },
+            format="json",
+        )
+        self.assertIn(r.status_code, (status.HTTP_403_FORBIDDEN, status.HTTP_400_BAD_REQUEST))
 
 
 from django.db import connection
@@ -104,7 +112,8 @@ class CompanyQueryCountTests(APITestCase):
             r = self.client.get("/api/v1/companies/profile/")
         self.assertEqual(r.status_code, 200)
         self.assertLessEqual(
-            len(ctx), COMPANY_QUERY_BUDGET,
+            len(ctx),
+            COMPANY_QUERY_BUDGET,
             f"Query count {len(ctx)} exceeds budget {COMPANY_QUERY_BUDGET}",
         )
 
@@ -112,16 +121,21 @@ class CompanyQueryCountTests(APITestCase):
 class CompanyCreateConflictTests(APITestCase):
     def test_company_create_returns_400_when_profile_exists(self):
         user = UserAccount.objects.create_user(
-            email="cc@example.com", password="Str0ng-Password!",
+            email="cc@example.com",
+            password="Str0ng-Password!",
             user_type="company",
         )
         # Signal already created a Company for this user.
         stream = BusinessStream.objects.create(business_stream_name="CC Tech")
         token = RefreshToken.for_user(user)
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token.access_token}")
-        r = self.client.post("/api/v1/companies/profile/", {
-            "company_name": "Another",
-            "business_stream": str(stream.id),
-        }, format="json")
+        r = self.client.post(
+            "/api/v1/companies/profile/",
+            {
+                "company_name": "Another",
+                "business_stream": str(stream.id),
+            },
+            format="json",
+        )
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("detail", r.data)
