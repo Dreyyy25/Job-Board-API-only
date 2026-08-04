@@ -21,6 +21,10 @@ local_settings.py
 db.sqlite3
 db.sqlite3-journal
 media/
+staticfiles/
+
+# Local docker-compose env (copy from .env.docker.example)
+.env.docker
 
 # IDE
 .idea/

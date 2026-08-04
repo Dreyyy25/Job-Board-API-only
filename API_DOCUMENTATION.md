@@ -141,7 +141,7 @@ Content-Type: application/json
 {
   "user_type": "job_seeker",
   "email": "jobseeker@example.com",
-  "password": "password123",
+  "password": "SmokeTest12345",
   "date_of_birth": "1995-03-15",
   "contact_number": "+1234567890",
   "sex": "M",
@@ -159,7 +159,6 @@ Content-Type: application/json
     "user_type": "job_seeker"
   },
   "tokens": {
-    "refresh": "eyJ0eXAiOiJKV1QiLCJhbGc...",
     "access": "eyJ0eXAiOiJKV1QiLCJhbGc..."
   }
 }
@@ -185,7 +184,7 @@ Content-Type: application/json
 
 {
   "email": "jobseeker@example.com",
-  "password": "password123"
+  "password": "SmokeTest12345"
 }
 ```
 
@@ -199,7 +198,6 @@ Content-Type: application/json
     "user_type": "job_seeker"
   },
   "tokens": {
-    "refresh": "eyJ0eXAiOiJKV1QiLCJhbGc...",
     "access": "eyJ0eXAiOiJKV1QiLCJhbGc..."
   }
 }

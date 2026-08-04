@@ -27,6 +27,13 @@ CSRF_COOKIE_SECURE = True
 # CORS_ALLOWED_ORIGINS — future hardening, not now.
 AUTH_REFRESH_COOKIE_SECURE = True
 
+# Whitenoise serves hashed+compressed static files; `default` must be
+# restated because STORAGES is replaced wholesale, not merged.
+STORAGES = {
+    'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+    'staticfiles': {'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage'},
+}
+
 # Fail-fast on misconfiguration. Clearer than a silent bad-deploy.
 assert not DEBUG, "DEBUG must be False in production"
 assert ALLOWED_HOSTS, "ALLOWED_HOSTS must not be empty in production"
