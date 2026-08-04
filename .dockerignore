@@ -1,0 +1,27 @@
+.git
+.github
+.claude
+.superpowers
+.ruff_cache
+.idea
+.vscode
+.venv
+**/.venv
+**/.env*
+**/__pycache__
+**/*.py[cod]
+**/*.log
+.python-version
+.DS_Store
+Thumbs.db
+db.sqlite3
+media/
+staticfiles/
+docs/
+*.md
+Job Board API.postman_collection.json
+Dockerfile
+docker-compose.yml
+.dockerignore
+.gitignore
+.gitattributes
