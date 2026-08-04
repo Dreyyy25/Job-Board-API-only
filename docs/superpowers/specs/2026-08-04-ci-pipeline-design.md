@@ -48,7 +48,7 @@ Every change to `staging` or `main` must pass the full verification suite before
 
 - `uv add --dev ruff`; config lives in `pyproject.toml`.
 - `target-version = "py313"`; default lint rules (pyflakes + core pycodestyle) to start — stricter rule sets are future one-commit follow-ups.
-- Format config matches the existing codebase (predominantly single quotes; implementer measures prevailing line length before choosing) — the goal is a small honest diff, not a blame-destroying reformat.
+- Format config matches the existing codebase — measured on 2026-08-04: `quote-style = "preserve"` and `line-length = 120` produce the minimum reformat churn (71 of 106 files, whitespace-only; single-quote would touch 77, double-quote 80, and no existing line exceeds 113 chars so nothing rewraps). The one-time normalization commit is shielded from blame via `.git-blame-ignore-revs`.
 - `*/migrations/*` excluded from lint and format — generated code.
 - Two separate commits: (a) dependency + config, (b) one-time cleanup making the existing codebase pass.
 
