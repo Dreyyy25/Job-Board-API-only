@@ -17,6 +17,11 @@ Run from the repository root (where `manage.py` lives). Dependencies are managed
 - Run a single test: `uv run python manage.py test apps.jobs.tests.TestClassName.test_method`
 - Django shell: `uv run python manage.py shell`
 
+**Known dev artifact:** `manage.py test` occasionally exits 1 *after* printing `OK` — a Postgres autovacuum worker on the churn-heavy test DB doesn't release `test_job_board` within `DROP DATABASE`'s 5-second grace ("database is being accessed by other users"). That is teardown noise, not a test failure; rerun, or drop it manually:
+```
+uv run python -c "import psycopg; from apps.ai.checkpointer import build_conn_string; c=psycopg.connect(build_conn_string().rsplit('/',1)[0]+'/postgres', autocommit=True); c.execute(\"select pg_terminate_backend(pid) from pg_stat_activity where datname='test_job_board' and pid <> pg_backend_pid()\"); c.execute('DROP DATABASE IF EXISTS test_job_board')"
+```
+
 A `.env` file is required at the repo root. Required keys: `SECRET_KEY`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` (required); `DB_HOST`, `DB_PORT`, `DEBUG`, `ALLOWED_HOSTS`, `ADMIN_URL` (optional, see `.env.example`). `SECRET_KEY`, `DB_NAME`, `DB_USER`, and `DB_PASSWORD` are read via `os.environ[...]` in `config.py` — the app crashes at import time if any of them are missing. PostgreSQL is required (not SQLite).
 
 All env access goes through `config.py` at the repo root. `jobApp/settings.py` and `jobApp/urls.py` import plain Python constants from it. Do **not** add new `os.getenv()` calls scattered through the codebase — extend `config.py` instead.
@@ -95,7 +100,7 @@ Each app exposes a DRF `DefaultRouter` plus a few function-based endpoints:
 - `/api/v1/companies/` — `business-streams`, `profile` (CompanyViewSet — path is `profile`, not `companies`), `company-images`, plus `dashboard/<uuid:user_id>/`.
 - `/api/v1/seekers/` — `profiles`, `education`, `experience`, `skills`, `seeker-skills`, plus `dashboard/<uuid:user_id>/`.
 - `/api/v1/jobs/` — `job-types`, `job-locations`, `job-posts`, `job-applications`, `job-skills`, plus `apply/`, `applications/job/<uuid>/`, `applications/user/<uuid>/`.
-- `/api/v1/ai/` — `job-post-assist/` (POST, company-only) and `resume-import/` (POST, seeker-only, exactly one of `text`/PDF `file` ≤ 5 MB) return drafts and create nothing; `job-posts/<uuid:job_post_id>/screen/` (POST, company-owner-or-admin, `?refresh=true` to bypass the cache) scores and ranks that post's applicants and caches the run as a `ScreeningReport`.
+- `/api/v1/ai/` — `job-post-assist/` (POST, company-only) and `resume-import/` (POST, seeker-only, exactly one of `text`/PDF `file` ≤ 5 MB) return drafts and create nothing; `job-posts/<uuid:job_post_id>/screen/` (POST, company-owner-or-admin, `?refresh=true` to bypass the cache) scores and ranks that post's applicants and caches the run as a `ScreeningReport`; `chat/` (POST, seeker-only, `{conversation_id?, message}` → `{conversation_id, reply}`), `chat/conversations/` (GET, seeker-only, own threads newest-first, capped at 50) and `chat/conversations/<uuid:conversation_id>/` (GET returns the transcript, DELETE removes the thread and its messages) drive the stateful chat assistant — the transcript GET was a deliberate addition beyond the original three-endpoint spec.
 
 ### AI features (`apps.ai`)
 
@@ -129,6 +134,119 @@ A stored `ScreeningReport` is replayed without an LLM call until
 withdraw-plus-reapply still invalidates. `created_at` is stamped with the
 **run's start**, not the row's write time, so an application arriving during
 the LLM call still invalidates the report instead of being lost forever.
+
+The chat assistant (**Pro** tier, seeker-only) is a `langchain.agents.create_agent`
+ReAct loop over four **read-only** tools in `apps/ai/tools.py`. `build_tools(user)`
+returns closures over the requesting user — **no tool takes a user id**, so text
+injected into a company-authored job description cannot redirect a tool at
+someone else's data. Tools only ever see `.published()` jobs and never expose
+`job_description_hidden`.
+
+Injection is also handled on the way *out*. `_sanitize_reply`
+(`apps/ai/services.py`) runs every live reply, and every stored message
+replayed into a transcript, through five ordered stages: (1) HTML entities are
+unescaped first, so a scheme can't be smuggled past the URL matchers by
+encoding a character; (2) dangerous raw HTML tags are stripped to a **fixed
+point** — a tag-name allowlist plus an any-attribute-assignment rule, so both
+named tags (`<img>`, `<script>`, `<image>`, ...) and unlisted tags carrying a
+fetch/execute attribute (`<div onmouseover=...>`) are caught — looped up to a
+pass bound because a single pass can leave a tag half-assembled
+(`<scr<img src=x>ipt>` reassembles into `<script>`); if the bound is hit with
+tag-shaped text still present, the loop **fails closed** into an unconditional
+`<...>` strip with no name/attribute allowlist at all, rather than leaking a
+partially-stripped tag; (3) markdown images/links are stripped; (4) bare
+scheme URLs (any scheme, not an enumerated list), `www.`-prefixed URLs, and
+protocol-relative (`//host/...`) URLs are stripped; (5) as the **final,
+load-bearing step**, the survivor is run through `html.escape(text,
+quote=False)` — a user-approved contract change, so whatever markup shape the
+matchers above didn't anticipate still reaches the client as inert
+`&lt;.../&gt;` text instead of live markup, closing the arms race by principle
+instead of by enumeration. Consequence for API consumers: the `chat/` `reply`
+field and a transcript's `assistant`-role `content` both carry
+`&lt;`/`&gt;`/`&amp;` entities — markdown/HTML clients render correctly as-is,
+plain-text clients must entity-decode once. Transcript **user**-role `content`
+is the opposite: `HumanMessage.text` verbatim, never escaped, because it is
+the requester's own text played back to them — clients must escape it
+themselves before rendering as HTML. (Declared in the serializers'
+`help_text` in `views.py`; stated here too because it's easy to miss.)
+
+Four bounds are enforced, all in `_build_chat_agent` plus the model factory:
+`ModelCallLimitMiddleware(run_limit=8, thread_limit=60, **exit_behavior='error'**)`,
+a 90s wall-clock deadline checked between model calls, a 20-message cap on what
+the model *sees*, and `max_output_tokens=1024`. `exit_behavior` must stay
+`'error'`: the default `'end'` appends a synthetic reply reading *"Model call
+limits exceeded: run limit (8/8)"* and hands it to the user as the assistant's
+answer. The two call limits map to **different** exceptions —
+`run_limit` → `AgentLimitExceededError` → **504** (retryable), `thread_limit` →
+`ConversationExhaustedError` → **409** (never retryable, because the counter is
+checkpointed and every future turn on that thread would raise too).
+
+Four LangChain v1 behaviours are counterintuitive and are each locked by tests:
+`agent.invoke()` returns the **whole thread**, so per-turn billing sums usage only
+over messages after the last `HumanMessage`; history trimming **must** use
+`@wrap_model_call` + `request.override(messages=...)` (a `@before_model` hook
+returning a subset does nothing, because `add_messages` appends rather than
+replaces); the trim uses `trim_messages(..., start_on='human', include_system=False)`
+rather than a raw tail slice, since a slice can open the window on a
+`ToolMessage` whose parent `AIMessage` was cut and Gemini rejects a
+`functionResponse` with no preceding `functionCall` — **with a fallback**: a
+single turn's own parallel tool calls can exceed `CHAT_HISTORY_MESSAGES` on
+their own, leaving no `HumanMessage` inside the trimmed window; when that
+happens the window becomes everything from the last `HumanMessage` onward
+instead, deliberately allowed to overflow the cap, because a turn cannot be
+truncated mid tool-call-sequence without orphaning a `ToolMessage`; and the
+system prompt lives in `ModelRequest.system_message`, so it is never part of
+the trimmed list. Failed turns still write their `AIUsageLog` row — the
+run-limit path has already made eight billed Pro calls — because usage is
+read back from the checkpoint and recorded **before** any rollback runs; that
+usage-recording call and the rollback call are each wrapped in their own
+`try/except Exception: logger.exception(...)`, so a bookkeeping failure in
+either can never mask or replace the original domain exception.
+
+Chat history lives in a LangGraph Postgres checkpointer (`apps/ai/checkpointer.py`),
+not in Django models: its own psycopg3 pool, its own schema, created once by
+`uv run python manage.py ai_checkpointer_setup` (**not** a Django migration).
+Deserialization is hardened by passing `JsonPlusSerializer(allowed_msgpack_modules=None)`
+explicitly to `PostgresSaver(...)` — that explicit serializer is the actual
+control. The `LANGGRAPH_STRICT_MSGPACK` env var set early in
+`jobApp/settings/base.py` is defence in depth only: langgraph snapshots that
+var into a module constant at import time (which `import langchain.agents`
+already triggers), so an app-code assignment is a verified no-op — do not rely
+on it alone. The offline test suite has its own guard: `jobApp/settings/test.py`
+sets `AI_BLOCK_REAL_CHECKPOINTER = True`, which makes the real
+`get_checkpointer()` raise `AssertionError` instead of opening a pool against
+the dev database (`config.DB_NAME`, a module constant the test runner never
+rewrites to `test_<db>`) — any new test that forgets to inject a
+fake/patched checkpointer fails loudly instead of quietly touching real data.
+
+Deleting chat content goes through one path: a `pre_delete` receiver on
+`Conversation` (`apps/ai/signals.py`) purges the checkpointer thread. That matters
+because `Conversation.user` is CASCADE and the messages live in tables with no FK
+to anything Django manages — without the receiver, deleting an account would
+strand the whole transcript in Postgres, unreachable and unpurgeable. Registering
+the receiver also disables Django's fast-delete path, which is what makes it fire
+on direct delete, `user.delete()` cascades, and bulk deletes alike. The purge runs
+**before** the row delete and **fails closed**: the checkpointer's autocommit pool
+cannot join a Django transaction, so a failed purge aborting the row delete —
+rather than deleting the row and leaving an unpurgeable transcript behind — is
+the safe direction, deliberately at the cost of blocking account deletion while
+the checkpointer is unreachable. Both delete sites (`delete_conversation` and the
+new-conversation rollback inside `send_chat_message`) wrap `conversation.delete()`
+in their own `transaction.atomic()`, because Django's collector runs
+`Collector.delete()` inside `atomic(savepoint=False)`; without a savepoint to
+unwind to, a raising `pre_delete` receiver would otherwise poison the caller's
+transaction so every later query raises `TransactionManagementError` even
+though the row itself survived. Partial-cascade caveat: deleting a user with N
+conversations purges thread-then-row one conversation at a time; if the purge
+for conversation #2 fails, Django rolls back that row delete (and the whole
+cascade, including the user row) — but conversation #1's thread is already
+gone, because the autocommit checkpointer pool has no transaction to roll back
+— so a retry-after-fix can leave conversation #1 rowed-and-listed with its
+transcript already purged.
+
+Throttling splits by cost: `chat/` is token-consuming and lists the **four**
+classes with `AIChatRateThrottle` (scope `ai-chat`, 10/min); the conversation
+list/detail/delete endpoints consume no tokens and use the house trio.
 
 ### Query hygiene
 
