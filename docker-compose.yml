@@ -1,0 +1,36 @@
+# Local parity harness: runs the EXACT production image against Postgres 18.
+# Render never reads this file. Copy .env.docker.example -> .env.docker first.
+services:
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: jobboard
+      POSTGRES_PASSWORD: jobboard
+      POSTGRES_DB: job_board
+    volumes:
+      # postgres:18 images mount data at /var/lib/postgresql (not .../data).
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      # -h 127.0.0.1 forces the check onto TCP: during first-boot initdb the
+      # image runs a TEMPORARY socket-only server, and a socket pg_isready
+      # passes while db:5432 still refuses connections — releasing web into a
+      # crash. The temp server never listens on TCP, so this form only goes
+      # healthy once the real server is up. (Adversarial review, verified
+      # against the postgres image entrypoint source.)
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U jobboard -d job_board"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  web:
+    build: .
+    env_file: .env.docker
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
