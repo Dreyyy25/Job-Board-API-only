@@ -277,7 +277,7 @@ def screen_applicants(request, job_post_id):
     return Response(report)
 
 
-# The reply (and every stored transcript message) is HTML-escaped by
+# `reply` is always assistant-produced and always passed through
 # _sanitize_reply — html.escape(text, quote=False) — so `<`, `>`, and `&`
 # arrive as `&lt;`, `&gt;`, `&amp;` entities. Markdown/HTML clients can render
 # the string directly (the entities display as the literal characters);
@@ -285,6 +285,22 @@ def screen_applicants(request, job_post_id):
 _REPLY_HELP_TEXT = (
     "HTML-escaped (&lt;/&gt;/&amp; entities). Markdown/HTML clients can "
     "render this directly; plain-text clients must entity-decode it once."
+)
+
+# Unlike `reply`, transcript `content` mixes two roles that get DIFFERENT
+# treatment in apps.ai.services.get_conversation_messages: 'assistant' rows go
+# through the same _sanitize_reply/html.escape pass as a live reply, but
+# 'user' rows are HumanMessage.text verbatim — never escaped, since it is the
+# requester's own submitted text being played back to them. A client that
+# entity-decodes or "renders directly" uniformly across roles will render the
+# user's raw markup unescaped (self-XSS today, stored-XSS if a transcript
+# ever reaches a second party) or corrupt literal `&`/`<` the user typed.
+_TRANSCRIPT_CONTENT_HELP_TEXT = (
+    "Escaping DIFFERS by role: assistant-role content is HTML-escaped "
+    "(&lt;/&gt;/&amp; entities) by the server, same as the chat reply field. "
+    "user-role content is returned verbatim as originally submitted — NOT "
+    "escaped. Clients must escape user-role content themselves before "
+    "rendering it as HTML; do not entity-decode it."
 )
 
 _ChatResponseSerializer = inline_serializer(
@@ -308,7 +324,7 @@ _TranscriptMessageSerializer = inline_serializer(
     name='ChatTranscriptMessage',
     fields={
         'role': drf_serializers.ChoiceField(choices=['user', 'assistant']),
-        'content': drf_serializers.CharField(help_text=_REPLY_HELP_TEXT),
+        'content': drf_serializers.CharField(help_text=_TRANSCRIPT_CONTENT_HELP_TEXT),
     },
 )
 
@@ -393,8 +409,19 @@ def list_conversations(request):
 
 
 @extend_schema(
+    methods=['GET'],
     responses={
         200: _TranscriptSerializer,
+        401: _AIDetailErrorSerializer,
+        403: _AIDetailErrorSerializer,
+        404: _AIErrorSerializer,
+        429: _AIDetailErrorSerializer,
+    },
+    tags=['ai'],
+)
+@extend_schema(
+    methods=['DELETE'],
+    responses={
         204: None,
         401: _AIDetailErrorSerializer,
         403: _AIDetailErrorSerializer,

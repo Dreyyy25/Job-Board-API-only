@@ -3333,6 +3333,9 @@ class ChatEndpointTests(_ChatServiceFixture, APITestCase):
             return self.client.post(self.URL, payload, format="json"), send
 
     def test_returns_conversation_id_and_reply(self):
+        """The service is mocked here — this is routing/pass-through coverage
+        only, not end-to-end coverage of what send_chat_message computes or
+        sanitizes. That lives in SendChatMessageTests."""
         response, _ = self._post({"message": "hi"})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(set(response.data), {"conversation_id", "reply"})
@@ -3474,6 +3477,9 @@ class ChatConversationsEndpointTests(_ChatServiceFixture, APITestCase):
             f"{self.URL}00000000-0000-0000-0000-000000000000/").status_code, 403)
 
     def test_transcript_returns_the_messages(self):
+        """The service is mocked here — this is routing/pass-through coverage
+        only, not end-to-end coverage of how the transcript is assembled
+        (role split, sanitization). That lives in GetConversationMessagesTests."""
         conversation = self._conversation()
         _auth(self.client, self.seeker)
         payload = {"id": str(conversation.id), "title": "mine",
@@ -3539,3 +3545,15 @@ class ChatSchemaTests(_ChatServiceFixture, APITestCase):
         ref = body["content"]["application/json"]["schema"]["$ref"].rsplit("/", 1)[-1]
         self.assertEqual(sorted(schema["components"]["schemas"][ref]["properties"]),
                          ["conversation_id", "reply"])
+
+    def test_get_and_delete_do_not_cross_declare_responses(self):
+        """GET and DELETE share one view function (conversation_detail). A
+        single shared @extend_schema(responses=...) would make the schema
+        claim DELETE can return the 200 transcript body and GET can return
+        204 — neither is true, so each method now carries its own decorator."""
+        schema = self._schema()
+        detail = schema["paths"]["/api/v1/ai/chat/conversations/{conversation_id}/"]
+        self.assertIn("200", detail["get"]["responses"])
+        self.assertNotIn("204", detail["get"]["responses"])
+        self.assertIn("204", detail["delete"]["responses"])
+        self.assertNotIn("200", detail["delete"]["responses"])
