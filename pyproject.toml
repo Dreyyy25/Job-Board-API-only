@@ -24,3 +24,24 @@ dependencies = [
 
 [tool.uv]
 package = false
+
+[dependency-groups]
+dev = [
+    "ruff>=0.16.1",
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 120
+extend-exclude = ["migrations"]
+
+[tool.ruff.lint]
+# Pinned deliberately: installed ruff's defaults are wider (I, RUF, SIM, ...)
+# and would force a large noisy cleanup. Stricter sets are future follow-ups.
+select = ["E4", "E7", "E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# Test modules accrete section-scoped imports between test classes; harmless.
+"apps/*/tests.py" = ["E402"]
+# Django settings idiom: star-import from base, then reference/override names.
+"jobApp/settings/*" = ["F403", "F405"]
