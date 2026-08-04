@@ -6,7 +6,7 @@ readme = "Readme.md"
 requires-python = ">=3.13"
 dependencies = [
     "argon2-cffi>=25.1.0",
-    "django>=5.2.15,<6",
+    "django>=6.0.7,<7",
     "django-cors-headers>=4.9.0",
     "django-filter>=25.2",
     "djangorestframework==3.16.1",
