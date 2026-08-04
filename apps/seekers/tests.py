@@ -116,7 +116,6 @@ class ExperienceConstraintTests(APITestCase):
             )
 
 
-from apps.seekers.models import SeekerProfile
 
 
 class SeekerProfileCreateConflictTests(APITestCase):

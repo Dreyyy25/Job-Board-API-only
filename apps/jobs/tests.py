@@ -1,12 +1,10 @@
 from rest_framework.test import APITestCase
 from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
-from django.core.cache import cache
 from django.db import connection
-from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
 from apps.accounts.models import UserAccount
-from apps.companies.models import BusinessStream, Company
+from apps.companies.models import BusinessStream
 from apps.jobs.models import JobType, JobLocation, JobPost
 
 
@@ -98,7 +96,6 @@ class JobPostPermissionTests(APITestCase):
         self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
 
 
-from apps.jobs.models import JobPostActivity
 
 
 class ApplicationTests(APITestCase):

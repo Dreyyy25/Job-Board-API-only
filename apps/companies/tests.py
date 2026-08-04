@@ -2,7 +2,7 @@ from rest_framework.test import APITestCase
 from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
 from apps.accounts.models import UserAccount
-from apps.companies.models import BusinessStream, Company
+from apps.companies.models import BusinessStream
 
 
 class CompanySerializerTests(APITestCase):
@@ -20,7 +20,7 @@ class CompanySerializerTests(APITestCase):
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {token.access_token}")
 
     def test_owner_cannot_reassign_user_account(self):
-        r = self.client.patch(
+        self.client.patch(
             f"/api/v1/companies/profile/{self.company.id}/",
             {"user_account": str(self.other.id)},
             format="json",

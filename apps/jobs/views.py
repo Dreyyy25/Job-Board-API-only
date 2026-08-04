@@ -1,5 +1,4 @@
 from drf_spectacular.utils import (
-    OpenApiParameter,
     OpenApiResponse,
     extend_schema,
     inline_serializer,

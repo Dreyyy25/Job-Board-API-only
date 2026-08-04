@@ -68,7 +68,7 @@ class MePatchTests(APITestCase):
         self.client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
 
     def test_me_patch_rejects_is_staff_escalation(self):
-        r = self.client.patch("/api/v1/accounts/me/",
+        self.client.patch("/api/v1/accounts/me/",
                               {"is_staff": True, "is_superuser": True},
                               format="json")
         self.user.refresh_from_db()
