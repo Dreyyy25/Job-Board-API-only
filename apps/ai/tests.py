@@ -3054,8 +3054,14 @@ class SanitizeReplyTests(TestCase):
     def test_double_encoded_markup_never_decodes_into_markup(self):
         """`&amp;lt;img src=x&amp;gt;` is what a model emits when it wants a
         client that decodes once to see `&lt;img src=x&gt;` — and a client
-        that decodes twice to see a live tag. One decode of our output must
-        yield inert text, never markup."""
+        that decodes twice to see a live tag. For THIS entity-encoded input,
+        one decode of our output yields inert text, never markup — that does
+        not generalize to raw markup that survived stripping, which
+        reconstitutes under decode-then-parse (see
+        test_hyphenated_custom_element_names_are_neutralised and friends for
+        that case). The guarantee that holds unconditionally: a client that
+        renders the reply as HTML/markdown, without pre-decoding, sees no
+        element."""
         import html as _html
 
         out = self._clean("&amp;lt;img src=x&amp;gt; is how you write it")

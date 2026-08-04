@@ -284,7 +284,10 @@ def screen_applicants(request, job_post_id):
 # plain-text clients must entity-decode it exactly once before display.
 _REPLY_HELP_TEXT = (
     "HTML-escaped (&lt;/&gt;/&amp; entities). Markdown/HTML clients can "
-    "render this directly; plain-text clients must entity-decode it once."
+    "render this directly; plain-text clients must entity-decode it once "
+    "and render the decoded result as text only — never insert it into "
+    "HTML/the DOM, since markup that survived stripping is inert only "
+    "while escaped."
 )
 
 # Unlike `reply`, transcript `content` mixes two roles that get DIFFERENT
@@ -297,10 +300,19 @@ _REPLY_HELP_TEXT = (
 # ever reaches a second party) or corrupt literal `&`/`<` the user typed.
 _TRANSCRIPT_CONTENT_HELP_TEXT = (
     "Escaping DIFFERS by role: assistant-role content is HTML-escaped "
-    "(&lt;/&gt;/&amp; entities) by the server, same as the chat reply field. "
+    "(&lt;/&gt;/&amp; entities) by the server, same as the chat reply field — "
+    "plain-text clients must entity-decode it once and render the decoded "
+    "result as text only, never insert it into HTML/the DOM, since markup "
+    "that survived stripping is inert only while escaped. "
     "user-role content is returned verbatim as originally submitted — NOT "
     "escaped. Clients must escape user-role content themselves before "
     "rendering it as HTML; do not entity-decode it."
+)
+
+_TITLE_HELP_TEXT = (
+    "The first user message, truncated to 60 characters, returned verbatim "
+    "— NOT HTML-escaped. Clients must escape it themselves before "
+    "rendering as HTML, same as transcript user-role content."
 )
 
 _ChatResponseSerializer = inline_serializer(
@@ -315,7 +327,7 @@ _ConversationSerializer = inline_serializer(
     name='ChatConversation',
     fields={
         'id': drf_serializers.UUIDField(),
-        'title': drf_serializers.CharField(),
+        'title': drf_serializers.CharField(help_text=_TITLE_HELP_TEXT),
         'created_at': drf_serializers.DateTimeField(),
     },
 )
@@ -332,7 +344,7 @@ _TranscriptSerializer = inline_serializer(
     name='ChatTranscript',
     fields={
         'id': drf_serializers.UUIDField(),
-        'title': drf_serializers.CharField(),
+        'title': drf_serializers.CharField(help_text=_TITLE_HELP_TEXT),
         'created_at': drf_serializers.DateTimeField(),
         # inline_serializer returns an instance; recover the class for many=True
         'messages': type(_TranscriptMessageSerializer)(many=True),

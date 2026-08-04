@@ -695,6 +695,8 @@ def _stored_messages(checkpointer, config):
     try:
         snapshot = checkpointer.get_tuple(config)
     except Exception:  # pragma: no cover - bookkeeping must not mask the error
+        logger.exception(
+            'ai chat: checkpointer read failed; treating thread as empty')
         return []
     if snapshot is None:
         return []

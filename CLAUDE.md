@@ -164,8 +164,12 @@ matchers above didn't anticipate still reaches the client as inert
 instead of by enumeration. Consequence for API consumers: the `chat/` `reply`
 field and a transcript's `assistant`-role `content` both carry
 `&lt;`/`&gt;`/`&amp;` entities — markdown/HTML clients render correctly as-is,
-plain-text clients must entity-decode once. Transcript **user**-role `content`
-is the opposite: `HumanMessage.text` verbatim, never escaped, because it is
+plain-text clients must entity-decode once and render the decoded output as
+text only — never insert it into HTML/the DOM, since markup that survived
+stripping is inert only while escaped (decode-then-`innerHTML` on
+`&lt;my-el onmouseover=...&gt;` reconstitutes a live element with a live
+handler). Transcript **user**-role `content` is the opposite:
+`HumanMessage.text` verbatim, never escaped, because it is
 the requester's own text played back to them — clients must escape it
 themselves before rendering as HTML. (Declared in the serializers'
 `help_text` in `views.py`; stated here too because it's easy to miss.)
