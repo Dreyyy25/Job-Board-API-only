@@ -28,7 +28,7 @@
 - `manage.py spectacular --help` shows `--fail-on-warn` exists.
 - `check --deploy` under production settings with the exact dummy env in Task 3 returns "System check identified no issues (0 silenced)."
 - `ruff check --select E4,E7,E9,F` finds exactly 33 violations (breakdown in Task 1).
-- `ruff format` with `quote-style = "preserve"`, `line-length = 120`, migrations excluded reformats 71 of 106 files — whitespace/blank-line/comment-spacing churn only. This was measured as the *minimum* churn config (single-quote: 77 files, double-quote: 80).
+- `ruff format` with `quote-style = "preserve"`, `line-length = 120`, migrations excluded reformats 71 of 106 files — whitespace/blank-line/comment-spacing churn only. This was measured as the *minimum* churn config (single-quote: 77 files, double-quote: 80). The 106 included markdown files (ruff 0.16 formats Python fences in `.md`); with `docs/` also excluded the count drops — Task 2 re-measures via `ruff format --check` before formatting. Execution note: the plan's original Task 1 config block omitted `[tool.ruff.format]`; Task 2's implementer caught it via the stop-the-line rule and the config was corrected before any format commit.
 - Codebase max line length is 113 → `line-length = 120` means the formatter never rewraps an existing line.
 - `gh` is authenticated as `Dreyyy25` with `repo` + `workflow` scopes.
 
@@ -60,7 +60,13 @@ Append after the existing `[tool.uv]` table:
 [tool.ruff]
 target-version = "py313"
 line-length = 120
-extend-exclude = ["migrations"]
+# docs/ excluded too: ruff 0.16 formats Python fences inside markdown, and
+# churning committed plan/spec documents serves nobody.
+extend-exclude = ["migrations", "docs"]
+
+[tool.ruff.format]
+# Keep existing quote characters — formatting normalizes whitespace only.
+quote-style = "preserve"
 
 [tool.ruff.lint]
 # Pinned deliberately: installed ruff's defaults are wider (I, RUF, SIM, ...)
@@ -123,13 +129,21 @@ git commit -m "refactor: drop unused imports and variables flagged by ruff"
 - Consumes: `[tool.ruff]` config from Task 1.
 - Produces: a formatted tree where `uv run ruff format --check .` exits 0 (Task 3's CI step depends on this).
 
+- [ ] **Step 0: Confirm the config is quote-preserving before touching anything**
+
+```
+uv run ruff format --check .
+```
+
+Verify `pyproject.toml` contains `[tool.ruff.format]` with `quote-style = "preserve"` and that `extend-exclude` covers both `migrations` and `docs`. Record the "N files would be reformatted" count — that is this run's expectation for Step 1. Only `.py` files may appear in the list; any `.md` file listed means the docs exclusion is broken — stop and fix the config first.
+
 - [ ] **Step 1: Run the formatter**
 
 ```
 uv run ruff format .
 ```
 
-Expected: "71 files reformatted" (±2 — Task 1's edits may shift a file into or out of scope). The diff is trailing whitespace, blank-line normalization, and comment spacing — the measured sample showed no line rewrapping (max existing line 113 < 120).
+Expected: exactly the file count Step 0 reported (~55–75 `.py` files). The diff is trailing whitespace, blank-line normalization, and comment spacing — no line rewrapping (max existing line 113 < 120) and **zero quote-character changes**.
 
 - [ ] **Step 2: Sanity-check the diff is format-only**
 
