@@ -24,6 +24,7 @@ from drf_spectacular.views import (
 )
 
 from config import ADMIN_URL
+from jobApp.views import healthz
 
 admin_url = ADMIN_URL
 
@@ -38,4 +39,5 @@ urlpatterns = [
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
     path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
     path('api/redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
+    path('healthz', healthz, name='healthz'),
 ]
