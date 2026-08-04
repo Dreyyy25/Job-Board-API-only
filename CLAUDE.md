@@ -34,6 +34,10 @@ Ruff is the linter/formatter: `uv run ruff check .` and `uv run ruff format .` l
 
 `staging` and `main` are protected by rulesets: changes land via PR with a green `ci` check — direct pushes are rejected, force pushes and deletions blocked, and the only merge method is a merge commit. Consequence: `staging` → `main` promotions are PRs, `main` gains one merge commit per promotion, and the two branches are no longer SHA-identical — that is expected, not drift. Merged head branches auto-delete on GitHub; prune locally with `git fetch --prune`.
 
+## Docker and deployment
+
+`Dockerfile` builds the production image: multi-stage uv → `python:3.13-slim`, non-root user, whitenoise-served static files collected at build time under production settings with inline dummy env. The entrypoint (`docker/entrypoint.sh`) runs `migrate` + `ai_checkpointer_setup` (both idempotent — Render's free tier has no pre-deploy hook) and then gunicorn with `--timeout 120`, which must stay above the AI chat's 90 s deadline. `docker compose up --build` runs that exact image against Postgres 18 locally — copy `.env.docker.example` to `.env.docker` (git-ignored) first. `GET /healthz` is a plain-Django health endpoint (cheap DB ping, no DRF, deliberately invisible to the OpenAPI schema). Render deployment — env table, health-check path, free-tier caveats — is documented in `DEPLOYMENT.md`; registry push and Render service setup are user-owned. Shell scripts are forced to LF via `.gitattributes` — don't commit `.sh` files with CRLF.
+
 ## Architecture
 
 Django 5.2 + DRF monolith with JWT auth. Four domain apps under `apps/`, each mounted under `/api/v1/<app>/` by `jobApp/urls.py`. The admin URL path is read from the `ADMIN_URL` env var (default `admin/`).
