@@ -16,9 +16,11 @@ def _auth(client, user):
 class JobPostHiddenFieldTests(APITestCase):
     def setUp(self):
         self.owner = UserAccount.objects.create_user(
-            email="owner@example.com", password="Str0ng-Password!", user_type="company")
+            email="owner@example.com", password="Str0ng-Password!", user_type="company"
+        )
         self.seeker = UserAccount.objects.create_user(
-            email="seeker@example.com", password="Str0ng-Password!", user_type="job_seeker")
+            email="seeker@example.com", password="Str0ng-Password!", user_type="job_seeker"
+        )
         stream = BusinessStream.objects.create(business_stream_name="Tech")
         company = self.owner.company_profile
         company.company_name = "Acme"
@@ -27,8 +29,11 @@ class JobPostHiddenFieldTests(APITestCase):
         job_type = JobType.objects.create(job_type_name="Full-time")
         location = JobLocation.objects.create(city="Manila", country="PH")
         self.job = JobPost.objects.create(
-            company=company, job_type=job_type, job_location=location,
-            job_title="Dev", job_description="public",
+            company=company,
+            job_type=job_type,
+            job_location=location,
+            job_title="Dev",
+            job_description="public",
             job_description_hidden="secret-notes",
         )
 
@@ -48,11 +53,14 @@ class JobPostHiddenFieldTests(APITestCase):
 class JobPostPermissionTests(APITestCase):
     def setUp(self):
         self.owner = UserAccount.objects.create_user(
-            email="owner@example.com", password="Str0ng-Password!", user_type="company")
+            email="owner@example.com", password="Str0ng-Password!", user_type="company"
+        )
         self.rival = UserAccount.objects.create_user(
-            email="rival@example.com", password="Str0ng-Password!", user_type="company")
+            email="rival@example.com", password="Str0ng-Password!", user_type="company"
+        )
         self.seeker = UserAccount.objects.create_user(
-            email="s@example.com", password="Str0ng-Password!", user_type="job_seeker")
+            email="s@example.com", password="Str0ng-Password!", user_type="job_seeker"
+        )
         stream = BusinessStream.objects.create(business_stream_name="Tech2")
         self.owner_co = self.owner.company_profile
         self.owner_co.company_name = "Owner Co"
@@ -65,13 +73,22 @@ class JobPostPermissionTests(APITestCase):
         self.job_type = JobType.objects.create(job_type_name="Contract")
         self.loc = JobLocation.objects.create(city="Cebu", country="PH")
         self.owner_job = JobPost.objects.create(
-            company=self.owner_co, job_type=self.job_type, job_location=self.loc,
-            job_title="Owner Job", job_description="...")
+            company=self.owner_co,
+            job_type=self.job_type,
+            job_location=self.loc,
+            job_title="Owner Job",
+            job_description="...",
+        )
 
     def test_anonymous_only_sees_published_active(self):
         JobPost.objects.create(
-            company=self.owner_co, job_type=self.job_type, job_location=self.loc,
-            job_title="Draft", job_description="x", is_published=False)
+            company=self.owner_co,
+            job_type=self.job_type,
+            job_location=self.loc,
+            job_title="Draft",
+            job_description="x",
+            is_published=False,
+        )
         r = self.client.get("/api/v1/jobs/job-posts/")
         self.assertEqual(r.status_code, 200)
         titles = [j["job_title"] for j in (r.data if isinstance(r.data, list) else r.data.get("results", []))]
@@ -80,32 +97,37 @@ class JobPostPermissionTests(APITestCase):
 
     def test_rival_cannot_edit_owner_job(self):
         _auth(self.client, self.rival)
-        r = self.client.patch(f"/api/v1/jobs/job-posts/{self.owner_job.id}/",
-                              {"job_title": "Pwned"}, format="json")
+        r = self.client.patch(f"/api/v1/jobs/job-posts/{self.owner_job.id}/", {"job_title": "Pwned"}, format="json")
         self.assertIn(r.status_code, (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND))
         self.owner_job.refresh_from_db()
         self.assertEqual(self.owner_job.job_title, "Owner Job")
 
     def test_seeker_cannot_create_job(self):
         _auth(self.client, self.seeker)
-        r = self.client.post("/api/v1/jobs/job-posts/", {
-            "job_type": str(self.job_type.id),
-            "job_location": str(self.loc.id),
-            "job_title": "Nope", "job_description": "x",
-        }, format="json")
+        r = self.client.post(
+            "/api/v1/jobs/job-posts/",
+            {
+                "job_type": str(self.job_type.id),
+                "job_location": str(self.loc.id),
+                "job_title": "Nope",
+                "job_description": "x",
+            },
+            format="json",
+        )
         self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
-
-
 
 
 class ApplicationTests(APITestCase):
     def setUp(self):
         self.seeker = UserAccount.objects.create_user(
-            email="app@example.com", password="Str0ng-Password!", user_type="job_seeker")
+            email="app@example.com", password="Str0ng-Password!", user_type="job_seeker"
+        )
         self.other_seeker = UserAccount.objects.create_user(
-            email="app2@example.com", password="Str0ng-Password!", user_type="job_seeker")
+            email="app2@example.com", password="Str0ng-Password!", user_type="job_seeker"
+        )
         owner = UserAccount.objects.create_user(
-            email="appowner@example.com", password="Str0ng-Password!", user_type="company")
+            email="appowner@example.com", password="Str0ng-Password!", user_type="company"
+        )
         stream = BusinessStream.objects.create(business_stream_name="Tech3")
         company = owner.company_profile
         company.company_name = "Co"
@@ -114,8 +136,8 @@ class ApplicationTests(APITestCase):
         job_type = JobType.objects.create(job_type_name="Intern")
         loc = JobLocation.objects.create(city="Davao", country="PH")
         self.job = JobPost.objects.create(
-            company=company, job_type=job_type, job_location=loc,
-            job_title="App Job", job_description="...")
+            company=company, job_type=job_type, job_location=loc, job_title="App Job", job_description="..."
+        )
 
     def test_seeker_cannot_apply_twice(self):
         _auth(self.client, self.seeker)
@@ -172,17 +194,32 @@ class JobPostFilterTests(APITestCase):
         self.tokyo = JobLocation.objects.create(city="Tokyo", country="JP")
 
         JobPost.objects.create(
-            company=company, job_type=self.ft, job_location=self.manila,
-            job_title="Senior Developer", job_description="python",
-            salary_min=1000, salary_max=5000)
+            company=company,
+            job_type=self.ft,
+            job_location=self.manila,
+            job_title="Senior Developer",
+            job_description="python",
+            salary_min=1000,
+            salary_max=5000,
+        )
         JobPost.objects.create(
-            company=company, job_type=self.pt, job_location=self.cebu,
-            job_title="Junior Dev", job_description="...",
-            salary_min=500, salary_max=1500)
+            company=company,
+            job_type=self.pt,
+            job_location=self.cebu,
+            job_title="Junior Dev",
+            job_description="...",
+            salary_min=500,
+            salary_max=1500,
+        )
         JobPost.objects.create(
-            company=company, job_type=self.ft, job_location=self.tokyo,
-            job_title="Staff Engineer", job_description="leadership",
-            salary_min=8000, salary_max=12000)
+            company=company,
+            job_type=self.ft,
+            job_location=self.tokyo,
+            job_title="Staff Engineer",
+            job_description="leadership",
+            salary_min=8000,
+            salary_max=12000,
+        )
 
     def _titles(self, response):
         return sorted(j["job_title"] for j in response.data["results"])
@@ -196,9 +233,7 @@ class JobPostFilterTests(APITestCase):
         self.assertEqual(self._titles(r), ["Senior Developer"])
 
     def test_filter_by_salary_range(self):
-        r = self.client.get(
-            "/api/v1/jobs/job-posts/?salary_min_gte=1000&salary_max_lte=5000"
-        )
+        r = self.client.get("/api/v1/jobs/job-posts/?salary_min_gte=1000&salary_max_lte=5000")
         self.assertEqual(self._titles(r), ["Senior Developer"])
 
     def test_search_by_title(self):
@@ -259,9 +294,13 @@ class JobPostSalaryConstraintTests(APITestCase):
     def test_salary_min_gt_max_rejected_by_db(self):
         with self.assertRaises(IntegrityError):
             JobPost.objects.create(
-                company=self.company, job_type=self.job_type, job_location=self.loc,
-                job_title="Bad", job_description="...",
-                salary_min=9000, salary_max=100,
+                company=self.company,
+                job_type=self.job_type,
+                job_location=self.loc,
+                job_title="Bad",
+                job_description="...",
+                salary_min=9000,
+                salary_max=100,
             )
 
     def test_negative_salary_rejected_by_serializer(self):
@@ -279,14 +318,14 @@ from apps.jobs import services as jobs_services
 class JobsServiceTests(APITestCase):
     def setUp(self):
         self.seeker = UserAccount.objects.create_user(
-            email="svc-seeker@example.com", password="Str0ng-Password!",
-            user_type="job_seeker")
+            email="svc-seeker@example.com", password="Str0ng-Password!", user_type="job_seeker"
+        )
         self.other_seeker = UserAccount.objects.create_user(
-            email="svc-other@example.com", password="Str0ng-Password!",
-            user_type="job_seeker")
+            email="svc-other@example.com", password="Str0ng-Password!", user_type="job_seeker"
+        )
         self.company_user = UserAccount.objects.create_user(
-            email="svc-co@example.com", password="Str0ng-Password!",
-            user_type="company")
+            email="svc-co@example.com", password="Str0ng-Password!", user_type="company"
+        )
         stream = BusinessStream.objects.create(business_stream_name="Svc Tech")
         company = self.company_user.company_profile
         company.company_name = "SvcCo"
@@ -295,8 +334,8 @@ class JobsServiceTests(APITestCase):
         jt = JobType.objects.create(job_type_name="Svc FT")
         loc = JobLocation.objects.create(city="SvcCity", country="PH")
         self.job = JobPost.objects.create(
-            company=company, job_type=jt, job_location=loc,
-            job_title="Svc Job", job_description="...")
+            company=company, job_type=jt, job_location=loc, job_title="Svc Job", job_description="..."
+        )
 
     def test_apply_for_job_rejects_company_user(self):
         with self.assertRaises(jobs_services.InvalidApplicantError):
@@ -336,12 +375,14 @@ class JobsServiceTests(APITestCase):
 
     def test_apply_for_job_duplicate_raises_already_applied(self):
         jobs_services.apply_for_job(
-            self.seeker, str(self.job.id),
+            self.seeker,
+            str(self.job.id),
             user_account_id=str(self.seeker.id),
         )
         with self.assertRaises(jobs_services.AlreadyAppliedError):
             jobs_services.apply_for_job(
-                self.seeker, str(self.job.id),
+                self.seeker,
+                str(self.job.id),
                 user_account_id=str(self.seeker.id),
             )
 
@@ -359,11 +400,11 @@ class ApplyEndpointContractTests(APITestCase):
 
     def setUp(self):
         self.seeker = UserAccount.objects.create_user(
-            email="contract-seeker@example.com", password="Str0ng-Password!",
-            user_type="job_seeker")
+            email="contract-seeker@example.com", password="Str0ng-Password!", user_type="job_seeker"
+        )
         co_user = UserAccount.objects.create_user(
-            email="contract-co@example.com", password="Str0ng-Password!",
-            user_type="company")
+            email="contract-co@example.com", password="Str0ng-Password!", user_type="company"
+        )
         stream = BusinessStream.objects.create(business_stream_name="Contract Tech")
         company = co_user.company_profile
         company.company_name = "ContractCo"
@@ -372,14 +413,18 @@ class ApplyEndpointContractTests(APITestCase):
         jt = JobType.objects.create(job_type_name="Contract FT")
         loc = JobLocation.objects.create(city="C", country="PH")
         self.job = JobPost.objects.create(
-            company=company, job_type=jt, job_location=loc,
-            job_title="C Job", job_description="...")
+            company=company, job_type=jt, job_location=loc, job_title="C Job", job_description="..."
+        )
         _auth(self.client, self.seeker)
 
     def test_apply_endpoint_returns_403_when_user_account_missing(self):
-        r = self.client.post("/api/v1/jobs/apply/", {
-            "job_post": str(self.job.id),
-        }, format="json")
+        r = self.client.post(
+            "/api/v1/jobs/apply/",
+            {
+                "job_post": str(self.job.id),
+            },
+            format="json",
+        )
         self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
 
 
@@ -396,6 +441,7 @@ class BurstThrottleAttachmentTests(APITestCase):
     def test_jobpost_viewset_has_layered_throttles(self):
         from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
         from apps.jobs.views import BurstRateThrottle, JobPostViewSet
+
         self.assertEqual(
             JobPostViewSet.throttle_classes,
             [AnonRateThrottle, UserRateThrottle, BurstRateThrottle],
@@ -404,6 +450,7 @@ class BurstThrottleAttachmentTests(APITestCase):
     def test_apply_for_job_has_burst_throttle(self):
         from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
         from apps.jobs.views import BurstRateThrottle, apply_for_job
+
         # @throttle_classes decorator stores the list on the wrapped view
         # via .throttle_classes (resolved by APIView metaclass).
         classes = getattr(apply_for_job.cls, 'throttle_classes', None)
@@ -414,6 +461,7 @@ class BurstThrottleAttachmentTests(APITestCase):
 
     def test_burst_throttle_scope_is_burst(self):
         from apps.jobs.views import BurstRateThrottle
+
         self.assertEqual(BurstRateThrottle.scope, 'burst')
 
 
@@ -433,8 +481,8 @@ class JobPostQueryCountTests(APITestCase):
         loc = JobLocation.objects.create(city="QCity", country="PH")
         for i in range(50):
             JobPost.objects.create(
-                company=company, job_type=jt, job_location=loc,
-                job_title=f"Job {i}", job_description="...")
+                company=company, job_type=jt, job_location=loc, job_title=f"Job {i}", job_description="..."
+            )
 
     def test_job_post_list_query_count(self):
         with CaptureQueriesContext(connection) as ctx:
@@ -442,6 +490,7 @@ class JobPostQueryCountTests(APITestCase):
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.data["count"], 50)
         self.assertLessEqual(
-            len(ctx), QUERY_BUDGET,
+            len(ctx),
+            QUERY_BUDGET,
             f"Query count {len(ctx)} exceeds budget {QUERY_BUDGET}",
         )

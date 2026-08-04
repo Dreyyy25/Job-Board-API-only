@@ -11,14 +11,13 @@ from apps.accounts.authentication import CustomJWTAuthentication
 from . import services
 from .models import SeekerProfile, EducationData, ExperienceData, SkillSet, SeekerSkillSet
 from .serializers import (
-    SeekerProfileSerializer, EducationDataSerializer,
-    ExperienceDataSerializer, SkillSetSerializer, SeekerSkillSetSerializer
+    SeekerProfileSerializer,
+    EducationDataSerializer,
+    ExperienceDataSerializer,
+    SkillSetSerializer,
+    SeekerSkillSetSerializer,
 )
-from .permissions import (
-    IsSeekerOwnerOrAdmin,
-    IsAdminOrReadOnly,
-    CanManageSeekerSkills
-)
+from .permissions import IsSeekerOwnerOrAdmin, IsAdminOrReadOnly, CanManageSeekerSkills
 
 
 _SeekerDashboardSerializer = inline_serializer(
@@ -32,8 +31,10 @@ _SeekerDashboardSerializer = inline_serializer(
 )
 
 _SeekersErrorSerializer = inline_serializer(
-    name='SeekersError', fields={'error': drf_serializers.CharField()},
+    name='SeekersError',
+    fields={'error': drf_serializers.CharField()},
 )
+
 
 # Create your views here.
 class SeekerProfileViewSet(viewsets.ModelViewSet):
@@ -43,11 +44,12 @@ class SeekerProfileViewSet(viewsets.ModelViewSet):
     - Companies can view seeker profiles (to evaluate applicants)
     - Admins can manage all profiles
     """
+
     queryset = SeekerProfile.objects.all()
     serializer_class = SeekerProfileSerializer
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [IsSeekerOwnerOrAdmin]
-    
+
     def get_queryset(self):
         """Admins/companies → all; seekers → own; else → none."""
         qs = SeekerProfile.objects.with_related()
@@ -57,7 +59,7 @@ class SeekerProfileViewSet(viewsets.ModelViewSet):
         if user.user_type == 'job_seeker':
             return qs.filter(user_account=user)
         return qs.none()
-    
+
     def perform_create(self, serializer):
         """Automatically assign the current user as the profile owner.
 
@@ -66,10 +68,9 @@ class SeekerProfileViewSet(viewsets.ModelViewSet):
         the OneToOne IntegrityError turn into a 500.
         """
         from rest_framework.exceptions import ValidationError
+
         if SeekerProfile.objects.filter(user_account=self.request.user).exists():
-            raise ValidationError(
-                {'detail': 'Profile already exists. Use PATCH to update.'}
-            )
+            raise ValidationError({'detail': 'Profile already exists. Use PATCH to update.'})
         serializer.save(user_account=self.request.user)
 
 
@@ -80,11 +81,12 @@ class EducationDataViewSet(viewsets.ModelViewSet):
     - Companies can view education data (to evaluate applicants)
     - Admins can manage all education data
     """
+
     queryset = EducationData.objects.all()
     serializer_class = EducationDataSerializer
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [IsSeekerOwnerOrAdmin]
-    
+
     def get_queryset(self):
         """Admins/companies → all; seekers → own; else → none."""
         qs = EducationData.objects.with_related()
@@ -94,7 +96,7 @@ class EducationDataViewSet(viewsets.ModelViewSet):
         if user.user_type == 'job_seeker':
             return qs.for_user(user)
         return qs.none()
-    
+
     def perform_create(self, serializer):
         """Automatically assign the current user"""
         serializer.save(user_account=self.request.user)
@@ -107,11 +109,12 @@ class ExperienceDataViewSet(viewsets.ModelViewSet):
     - Companies can view experience data (to evaluate applicants)
     - Admins can manage all experience data
     """
+
     queryset = ExperienceData.objects.all()
     serializer_class = ExperienceDataSerializer
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [IsSeekerOwnerOrAdmin]
-    
+
     def get_queryset(self):
         """Admins/companies → all; seekers → own; else → none."""
         qs = ExperienceData.objects.with_related()
@@ -121,7 +124,7 @@ class ExperienceDataViewSet(viewsets.ModelViewSet):
         if user.user_type == 'job_seeker':
             return qs.for_user(user)
         return qs.none()
-    
+
     def perform_create(self, serializer):
         """Automatically assign the current user"""
         serializer.save(user_account=self.request.user)
@@ -133,6 +136,7 @@ class SkillSetViewSet(viewsets.ModelViewSet):
     - Everyone can view available skills
     - Only admins can create/update/delete skills
     """
+
     queryset = SkillSet.objects.all()
     serializer_class = SkillSetSerializer
     authentication_classes = [CustomJWTAuthentication]
@@ -146,11 +150,12 @@ class SeekerSkillSetViewSet(viewsets.ModelViewSet):
     - Companies can view seeker skills (to evaluate applicants)
     - Admins can manage all seeker skills
     """
+
     queryset = SeekerSkillSet.objects.all()
     serializer_class = SeekerSkillSetSerializer
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [CanManageSeekerSkills]
-    
+
     def get_queryset(self):
         """Admins/companies → all; seekers → own; else → none."""
         qs = SeekerSkillSet.objects.with_related()
@@ -160,7 +165,7 @@ class SeekerSkillSetViewSet(viewsets.ModelViewSet):
         if user.user_type == 'job_seeker':
             return qs.for_user(user)
         return qs.none()
-    
+
     def perform_create(self, serializer):
         """Automatically assign the current user"""
         serializer.save(user_account=self.request.user)

@@ -1,4 +1,5 @@
 """Thin dispatchers: validate input, call the service, translate exceptions."""
+
 from drf_spectacular.utils import (
     OpenApiParameter,
     PolymorphicProxySerializer,
@@ -43,11 +44,13 @@ from .throttling import AIChatRateThrottle, AIRateThrottle
 # Declaring only the first would make the schema lie about every DRF-generated
 # response, so the statuses that can produce either are declared as a oneOf.
 _AIErrorSerializer = inline_serializer(
-    name='AIError', fields={'error': drf_serializers.CharField()},
+    name='AIError',
+    fields={'error': drf_serializers.CharField()},
 )
 
 _AIDetailErrorSerializer = inline_serializer(
-    name='AIDetailError', fields={'detail': drf_serializers.CharField()},
+    name='AIDetailError',
+    fields={'detail': drf_serializers.CharField()},
 )
 
 _AIEitherErrorSerializer = PolymorphicProxySerializer(
@@ -106,13 +109,14 @@ def job_post_assist(request):
     except CompanyProfileMissingError:
         return Response(
             {'error': 'You must complete your company profile before using the AI writer'},
-            status=status.HTTP_400_BAD_REQUEST)
+            status=status.HTTP_400_BAD_REQUEST,
+        )
     except AIQuotaExceededError:
-        return Response({'error': 'AI provider quota exceeded — try again later'},
-                        status=status.HTTP_429_TOO_MANY_REQUESTS)
+        return Response(
+            {'error': 'AI provider quota exceeded — try again later'}, status=status.HTTP_429_TOO_MANY_REQUESTS
+        )
     except (AIProviderError, AIResponseInvalidError):
-        return Response({'error': 'AI provider unavailable — try again later'},
-                        status=status.HTTP_502_BAD_GATEWAY)
+        return Response({'error': 'AI provider unavailable — try again later'}, status=status.HTTP_502_BAD_GATEWAY)
     return Response(draft)
 
 
@@ -158,8 +162,7 @@ _ResumeImportResponseSerializer = inline_serializer(
         'education': type(_EducationEntrySerializer)(many=True),
         'experience': type(_ExperienceEntrySerializer)(many=True),
         'skills': type(_ResumeSkillSerializer)(many=True),
-        'new_skill_suggestions': drf_serializers.ListField(
-            child=drf_serializers.CharField()),
+        'new_skill_suggestions': drf_serializers.ListField(child=drf_serializers.CharField()),
     },
 )
 
@@ -192,11 +195,11 @@ def resume_import(request):
     except InvalidResumeFileError as e:
         return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
     except AIQuotaExceededError:
-        return Response({'error': 'AI provider quota exceeded — try again later'},
-                        status=status.HTTP_429_TOO_MANY_REQUESTS)
+        return Response(
+            {'error': 'AI provider quota exceeded — try again later'}, status=status.HTTP_429_TOO_MANY_REQUESTS
+        )
     except (AIProviderError, AIResponseInvalidError):
-        return Response({'error': 'AI provider unavailable — try again later'},
-                        status=status.HTTP_502_BAD_GATEWAY)
+        return Response({'error': 'AI provider unavailable — try again later'}, status=status.HTTP_502_BAD_GATEWAY)
     return Response(draft)
 
 
@@ -233,8 +236,12 @@ _ScreeningResponseSerializer = inline_serializer(
     request=None,
     parameters=[
         OpenApiParameter(
-            name='refresh', type=bool, location=OpenApiParameter.QUERY, required=False,
-            description='Force a fresh screening run instead of returning the cached report.'),
+            name='refresh',
+            type=bool,
+            location=OpenApiParameter.QUERY,
+            required=False,
+            description='Force a fresh screening run instead of returning the cached report.',
+        ),
     ],
     responses={
         200: _ScreeningResponseSerializer,
@@ -257,23 +264,19 @@ def screen_applicants(request, job_post_id):
     """Score and rank this job post's applicants. Cached until a newer application arrives."""
     refresh = request.query_params.get('refresh', '').lower() in ('1', 'true', 'yes')
     try:
-        report = services.screen_applicants(
-            request.user, job_post_id=job_post_id, refresh=refresh)
+        report = services.screen_applicants(request.user, job_post_id=job_post_id, refresh=refresh)
     except JobPostNotFoundError:
-        return Response({'error': 'Job post not found'},
-                        status=status.HTTP_404_NOT_FOUND)
+        return Response({'error': 'Job post not found'}, status=status.HTTP_404_NOT_FOUND)
     except ScreeningPermissionError:
-        return Response({'error': 'You do not have access to this job post'},
-                        status=status.HTTP_403_FORBIDDEN)
+        return Response({'error': 'You do not have access to this job post'}, status=status.HTTP_403_FORBIDDEN)
     except NoApplicantsError:
-        return Response({'error': 'This job post has no applicants to screen'},
-                        status=status.HTTP_409_CONFLICT)
+        return Response({'error': 'This job post has no applicants to screen'}, status=status.HTTP_409_CONFLICT)
     except AIQuotaExceededError:
-        return Response({'error': 'AI provider quota exceeded — try again later'},
-                        status=status.HTTP_429_TOO_MANY_REQUESTS)
+        return Response(
+            {'error': 'AI provider quota exceeded — try again later'}, status=status.HTTP_429_TOO_MANY_REQUESTS
+        )
     except (AIProviderError, AIResponseInvalidError):
-        return Response({'error': 'AI provider unavailable — try again later'},
-                        status=status.HTTP_502_BAD_GATEWAY)
+        return Response({'error': 'AI provider unavailable — try again later'}, status=status.HTTP_502_BAD_GATEWAY)
     return Response(report)
 
 
@@ -369,8 +372,7 @@ _TranscriptSerializer = inline_serializer(
 )
 @api_view(['POST'])
 @permission_classes([IsSeekerUser])
-@throttle_classes([AnonRateThrottle, UserRateThrottle, BurstRateThrottle,
-                   AIChatRateThrottle])
+@throttle_classes([AnonRateThrottle, UserRateThrottle, BurstRateThrottle, AIChatRateThrottle])
 def chat(request):
     """One chat turn. The agent's tools are read-only — nothing is created."""
     serializer = ChatRequestSerializer(data=request.data)
@@ -383,23 +385,23 @@ def chat(request):
             conversation_id=str(conversation_id) if conversation_id else None,
         )
     except ConversationNotFoundError:
-        return Response({'error': 'Conversation not found'},
-                        status=status.HTTP_404_NOT_FOUND)
+        return Response({'error': 'Conversation not found'}, status=status.HTTP_404_NOT_FOUND)
     except ConversationExhaustedError:
         # Deliberately NOT the 504: this thread can never answer again.
         return Response(
-            {'error': 'This conversation has reached its limit — start a new one'},
-            status=status.HTTP_409_CONFLICT)
+            {'error': 'This conversation has reached its limit — start a new one'}, status=status.HTTP_409_CONFLICT
+        )
     except AgentLimitExceededError:
         return Response(
             {'error': 'The assistant took too long to answer — try a simpler question'},
-            status=status.HTTP_504_GATEWAY_TIMEOUT)
+            status=status.HTTP_504_GATEWAY_TIMEOUT,
+        )
     except AIQuotaExceededError:
-        return Response({'error': 'AI provider quota exceeded — try again later'},
-                        status=status.HTTP_429_TOO_MANY_REQUESTS)
+        return Response(
+            {'error': 'AI provider quota exceeded — try again later'}, status=status.HTTP_429_TOO_MANY_REQUESTS
+        )
     except (AIProviderError, AIResponseInvalidError):
-        return Response({'error': 'AI provider unavailable — try again later'},
-                        status=status.HTTP_502_BAD_GATEWAY)
+        return Response({'error': 'AI provider unavailable — try again later'}, status=status.HTTP_502_BAD_GATEWAY)
     return Response(result)
 
 
@@ -452,11 +454,8 @@ def conversation_detail(request, conversation_id):
     """
     try:
         if request.method == 'DELETE':
-            services.delete_conversation(
-                request.user, conversation_id=str(conversation_id))
+            services.delete_conversation(request.user, conversation_id=str(conversation_id))
             return Response(status=status.HTTP_204_NO_CONTENT)
-        return Response(services.get_conversation_messages(
-            request.user, conversation_id=str(conversation_id)))
+        return Response(services.get_conversation_messages(request.user, conversation_id=str(conversation_id)))
     except ConversationNotFoundError:
-        return Response({'error': 'Conversation not found'},
-                        status=status.HTTP_404_NOT_FOUND)
+        return Response({'error': 'Conversation not found'}, status=status.HTTP_404_NOT_FOUND)

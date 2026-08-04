@@ -10,7 +10,10 @@ class JobPostQuerySet(models.QuerySet):
 
     def with_related(self):
         return self.select_related(
-            'company', 'company__business_stream', 'job_type', 'job_location',
+            'company',
+            'company__business_stream',
+            'job_type',
+            'job_location',
         ).prefetch_related('required_skills__skill_set')
 
 
@@ -23,7 +26,9 @@ class JobPostActivityQuerySet(models.QuerySet):
 
     def with_related(self):
         return self.select_related(
-            'user_account', 'job_post', 'job_post__company',
+            'user_account',
+            'job_post',
+            'job_post__company',
         )
 
 

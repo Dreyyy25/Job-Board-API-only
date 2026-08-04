@@ -1,4 +1,5 @@
 """Test settings — fast password hashing, loose host list, no SSL redirect."""
+
 from .base import *  # noqa: F401,F403
 from .base import REST_FRAMEWORK as _BASE_RF
 

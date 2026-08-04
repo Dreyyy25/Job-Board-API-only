@@ -5,6 +5,7 @@ exceptions into HTTP responses via the exception-to-HTTP map pinned
 in the Tier 2 spec. The view never imports simplejwt — the service
 wraps TokenError into InvalidTokenError so the abstraction holds.
 """
+
 import hashlib
 import logging
 
@@ -69,7 +70,10 @@ def register_user(email, password, user_type, **extra):
         user=UserAccount(email=email, user_type=user_type),
     )
     user = UserAccount.objects.create_user(
-        email=email, password=password, user_type=user_type, **extra,
+        email=email,
+        password=password,
+        user_type=user_type,
+        **extra,
     )
     user = UserAccount.objects.with_profile().get(pk=user.pk)
     return user, _mint_tokens(user)
@@ -85,12 +89,14 @@ def login_user(email, password):
         user = UserAccount.objects.get(email=email)
     except UserAccount.DoesNotExist:
         _security_logger.warning(
-            'Failed login attempt for email_hash=%s', _email_hash(email),
+            'Failed login attempt for email_hash=%s',
+            _email_hash(email),
         )
         raise InvalidCredentialsError()
     if not user.check_password(password):
         _security_logger.warning(
-            'Failed login attempt for email_hash=%s', _email_hash(email),
+            'Failed login attempt for email_hash=%s',
+            _email_hash(email),
         )
         raise InvalidCredentialsError()
     user.last_login = timezone.now()

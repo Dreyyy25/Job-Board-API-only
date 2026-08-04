@@ -8,6 +8,7 @@ Required variables raise `KeyError` at import time if missing — that is
 deliberate: a missing `SECRET_KEY` should crash startup, not produce a
 running server with an undefined signing key.
 """
+
 import os
 from pathlib import Path
 
@@ -54,13 +55,9 @@ CORS_ALLOW_ALL_ORIGINS: bool = DEBUG and not CORS_ALLOWED_ORIGINS
 # --- Production security headers ---------------------------------------------
 SECURE_SSL_REDIRECT: bool = _bool("SECURE_SSL_REDIRECT", default=False)
 SECURE_HSTS_SECONDS: int = int(os.getenv("SECURE_HSTS_SECONDS", "0"))
-SECURE_HSTS_INCLUDE_SUBDOMAINS: bool = _bool(
-    "SECURE_HSTS_INCLUDE_SUBDOMAINS", default=True
-)
+SECURE_HSTS_INCLUDE_SUBDOMAINS: bool = _bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", default=True)
 SECURE_HSTS_PRELOAD: bool = _bool("SECURE_HSTS_PRELOAD", default=True)
-SECURE_PROXY_SSL_HEADER: tuple[str, str] | None = _proxy_header(
-    "SECURE_PROXY_SSL_HEADER"
-)
+SECURE_PROXY_SSL_HEADER: tuple[str, str] | None = _proxy_header("SECURE_PROXY_SSL_HEADER")
 CSRF_TRUSTED_ORIGINS: list[str] = _csv("CSRF_TRUSTED_ORIGINS")
 SESSION_COOKIE_SECURE: bool = _bool("SESSION_COOKIE_SECURE", default=not DEBUG)
 CSRF_COOKIE_SECURE: bool = _bool("CSRF_COOKIE_SECURE", default=not DEBUG)

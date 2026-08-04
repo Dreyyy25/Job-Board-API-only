@@ -2,6 +2,7 @@
 
 Idempotent: PostgresSaver.setup() re-runs its own migrations safely.
 """
+
 from django.core.management.base import BaseCommand
 
 from apps.ai.checkpointer import get_checkpointer

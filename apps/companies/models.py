@@ -5,35 +5,35 @@ from apps.accounts.models import UserAccount
 
 from .managers import CompanyImagesQuerySet, CompanyQuerySet
 
+
 # Create your models here.
 class BusinessStream(models.Model):
     """Business categories/industries for companies"""
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     business_stream_name = models.CharField(max_length=100, unique=True)
-    
+
     def __str__(self):
         return self.business_stream_name
-    
+
     class Meta:
         ordering = ['business_stream_name']
 
+
 class Company(models.Model):
     """Company profiles for business users"""
-    
+
     STATUS_CHOICES = [
         ('active', 'Active'),
         ('inactive', 'Inactive'),
         ('suspended', 'Suspended'),
     ]
-    
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user_account = models.OneToOneField(
-        UserAccount, 
-        on_delete=models.CASCADE, 
-        related_name='company_profile',
-        limit_choices_to={'user_type': 'company'}
+        UserAccount, on_delete=models.CASCADE, related_name='company_profile', limit_choices_to={'user_type': 'company'}
     )
-    
+
     company_name = models.CharField(max_length=200)
     business_stream = models.ForeignKey(BusinessStream, on_delete=models.CASCADE)
     profile_description = models.TextField(blank=True)
@@ -55,9 +55,10 @@ class Company(models.Model):
             models.Index(fields=['status'], name='company_status_idx'),
         ]
 
+
 class CompanyImages(models.Model):
     """Images for company profiles"""
-    
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='images')
     image_url = models.URLField(max_length=500)
@@ -67,7 +68,7 @@ class CompanyImages(models.Model):
 
     def __str__(self):
         return f"{self.company.company_name} - Image"
-    
+
     class Meta:
         ordering = ['-created_at']
         verbose_name_plural = "Company Images"

@@ -1,6 +1,7 @@
 """
 Custom permission classes for the jobs app
 """
+
 from rest_framework.permissions import BasePermission, SAFE_METHODS
 
 
@@ -11,7 +12,7 @@ class IsJobPosterOrAdmin(BasePermission):
     - Company owners can create and manage their own job posts
     - Admins can manage all job posts
     """
-    
+
     def has_permission(self, request, view):
         """
         Read permissions for everyone,
@@ -20,10 +21,10 @@ class IsJobPosterOrAdmin(BasePermission):
         # Read permissions for everyone
         if request.method in SAFE_METHODS:
             return True
-        
+
         # Write permissions require authentication
         return request.user and request.user.is_authenticated
-    
+
     def has_object_permission(self, request, view, obj):
         """
         Object-level permission:
@@ -34,11 +35,11 @@ class IsJobPosterOrAdmin(BasePermission):
         # Read permissions for published jobs
         if request.method in SAFE_METHODS:
             return obj.is_published
-        
+
         # Admins can modify anything
         if request.user.is_staff or request.user.is_superuser:
             return True
-        
+
         # Company owners can only modify their company's jobs
         return obj.company.user_account.id == request.user.id
 
@@ -50,11 +51,11 @@ class IsApplicantOrCompanyOrAdmin(BasePermission):
     - Company owners can view applications to their jobs
     - Admins can view all applications
     """
-    
+
     def has_permission(self, request, view):
         """Require authentication for all operations"""
         return request.user and request.user.is_authenticated
-    
+
     def has_object_permission(self, request, view, obj):
         """
         Object-level permission:
@@ -65,18 +66,18 @@ class IsApplicantOrCompanyOrAdmin(BasePermission):
         # Admins can access everything
         if request.user.is_staff or request.user.is_superuser:
             return True
-        
+
         # Job seekers can access their own applications
         if obj.user_account.id == request.user.id:
             return True
-        
+
         # Company owners can access applications to their jobs
         if obj.job_post.company.user_account.id == request.user.id:
             # Company can view but not delete applications
             if request.method == 'DELETE':
                 return False
             return True
-        
+
         return False
 
 
@@ -85,11 +86,11 @@ class IsApplicant(BasePermission):
     Strict permission - only the job seeker who applied can access.
     Used for withdrawing applications.
     """
-    
+
     def has_permission(self, request, view):
         """Require authentication"""
         return request.user and request.user.is_authenticated
-    
+
     def has_object_permission(self, request, view, obj):
         """Only the applicant can access"""
         return obj.user_account.id == request.user.id
@@ -101,7 +102,7 @@ class IsAdminOrReadOnly(BasePermission):
     - Everyone can read
     - Only admins can create/update/delete
     """
-    
+
     def has_permission(self, request, view):
         """
         Read permissions for everyone,
@@ -110,7 +111,7 @@ class IsAdminOrReadOnly(BasePermission):
         # Read permissions for everyone
         if request.method in SAFE_METHODS:
             return True
-        
+
         # Write permissions only for admins
         return request.user and (request.user.is_staff or request.user.is_superuser)
 
@@ -122,7 +123,7 @@ class CanManageJobSkills(BasePermission):
     - Company owners can manage skills for their job posts
     - Admins can manage all skills
     """
-    
+
     def has_permission(self, request, view):
         """
         Read permissions for everyone,
@@ -131,10 +132,10 @@ class CanManageJobSkills(BasePermission):
         # Read permissions for everyone
         if request.method in SAFE_METHODS:
             return True
-        
+
         # Write permissions require authentication
         return request.user and request.user.is_authenticated
-    
+
     def has_object_permission(self, request, view, obj):
         """
         Object-level permission:
@@ -145,10 +146,10 @@ class CanManageJobSkills(BasePermission):
         # Read permissions for published jobs
         if request.method in SAFE_METHODS:
             return obj.job_post.is_published
-        
+
         # Admins can modify anything
         if request.user.is_staff or request.user.is_superuser:
             return True
-        
+
         # Company owners can only modify skills for their jobs
         return obj.job_post.company.user_account.id == request.user.id

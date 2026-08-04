@@ -13,9 +13,11 @@ def _auth(client, user):
 class SeekerPermissionTests(APITestCase):
     def setUp(self):
         self.seeker = UserAccount.objects.create_user(
-            email="s@example.com", password="Str0ng-Password!", user_type="job_seeker")
+            email="s@example.com", password="Str0ng-Password!", user_type="job_seeker"
+        )
         self.other = UserAccount.objects.create_user(
-            email="o@example.com", password="Str0ng-Password!", user_type="job_seeker")
+            email="o@example.com", password="Str0ng-Password!", user_type="job_seeker"
+        )
         self.other_edu = EducationData.objects.create(
             user_account=self.other,
             institute_university_name="X",
@@ -25,18 +27,22 @@ class SeekerPermissionTests(APITestCase):
     def test_seeker_cannot_edit_other_education(self):
         _auth(self.client, self.seeker)
         r = self.client.patch(
-            f"/api/v1/seekers/education/{self.other_edu.id}/",
-            {"institute_university_name": "Pwned"}, format="json")
+            f"/api/v1/seekers/education/{self.other_edu.id}/", {"institute_university_name": "Pwned"}, format="json"
+        )
         self.assertIn(r.status_code, (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND))
         self.other_edu.refresh_from_db()
         self.assertEqual(self.other_edu.institute_university_name, "X")
 
     def test_seeker_can_create_own_education(self):
         _auth(self.client, self.seeker)
-        r = self.client.post("/api/v1/seekers/education/", {
-            "institute_university_name": "Mine",
-            "degree_type": "Bachelor",
-        }, format="json")
+        r = self.client.post(
+            "/api/v1/seekers/education/",
+            {
+                "institute_university_name": "Mine",
+                "degree_type": "Bachelor",
+            },
+            format="json",
+        )
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
         self.assertEqual(EducationData.objects.get(id=r.data["id"]).user_account_id, self.seeker.id)
 
@@ -49,16 +55,20 @@ from apps.seekers.models import ExperienceData
 class EducationConstraintTests(APITestCase):
     def setUp(self):
         self.seeker = UserAccount.objects.create_user(
-            email="edu-c@example.com", password="Str0ng-Password!",
-            user_type="job_seeker")
+            email="edu-c@example.com", password="Str0ng-Password!", user_type="job_seeker"
+        )
         _auth(self.client, self.seeker)
 
     def test_percentage_out_of_range_rejected_by_serializer(self):
-        r = self.client.post("/api/v1/seekers/education/", {
-            "institute_university_name": "X",
-            "degree_type": "Bachelor",
-            "percentage": 150,
-        }, format="json")
+        r = self.client.post(
+            "/api/v1/seekers/education/",
+            {
+                "institute_university_name": "X",
+                "degree_type": "Bachelor",
+                "percentage": 150,
+            },
+            format="json",
+        )
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_percentage_out_of_range_rejected_by_db(self):
@@ -71,12 +81,16 @@ class EducationConstraintTests(APITestCase):
             )
 
     def test_start_after_end_rejected_by_serializer(self):
-        r = self.client.post("/api/v1/seekers/education/", {
-            "institute_university_name": "X",
-            "degree_type": "Bachelor",
-            "start_date": "2020-01-01",
-            "end_date": "2019-01-01",
-        }, format="json")
+        r = self.client.post(
+            "/api/v1/seekers/education/",
+            {
+                "institute_university_name": "X",
+                "degree_type": "Bachelor",
+                "start_date": "2020-01-01",
+                "end_date": "2019-01-01",
+            },
+            format="json",
+        )
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_start_after_end_rejected_by_db(self):
@@ -93,42 +107,50 @@ class EducationConstraintTests(APITestCase):
 class ExperienceConstraintTests(APITestCase):
     def setUp(self):
         self.seeker = UserAccount.objects.create_user(
-            email="exp-c@example.com", password="Str0ng-Password!",
-            user_type="job_seeker")
+            email="exp-c@example.com", password="Str0ng-Password!", user_type="job_seeker"
+        )
         _auth(self.client, self.seeker)
 
     def test_start_after_end_rejected_by_serializer(self):
-        r = self.client.post("/api/v1/seekers/experience/", {
-            "company_name": "X",
-            "position": "Dev",
-            "start_date": "2020-01-01",
-            "end_date": "2019-01-01",
-        }, format="json")
+        r = self.client.post(
+            "/api/v1/seekers/experience/",
+            {
+                "company_name": "X",
+                "position": "Dev",
+                "start_date": "2020-01-01",
+                "end_date": "2019-01-01",
+            },
+            format="json",
+        )
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
 
     def test_start_after_end_rejected_by_db(self):
         with self.assertRaises(IntegrityError):
             ExperienceData.objects.create(
                 user_account=self.seeker,
-                company_name="X", position="Dev",
+                company_name="X",
+                position="Dev",
                 start_date=date(2020, 1, 1),
                 end_date=date(2019, 1, 1),
             )
 
 
-
-
 class SeekerProfileCreateConflictTests(APITestCase):
     def test_seeker_profile_create_returns_400_when_profile_exists(self):
         user = UserAccount.objects.create_user(
-            email="sc@example.com", password="Str0ng-Password!",
+            email="sc@example.com",
+            password="Str0ng-Password!",
             user_type="job_seeker",
         )
         # Signal already created a SeekerProfile.
         _auth(self.client, user)
-        r = self.client.post("/api/v1/seekers/profiles/", {
-            "first_name": "Dup",
-            "last_name": "Attempt",
-        }, format="json")
+        r = self.client.post(
+            "/api/v1/seekers/profiles/",
+            {
+                "first_name": "Dup",
+                "last_name": "Attempt",
+            },
+            format="json",
+        )
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("detail", r.data)
