@@ -33,7 +33,11 @@ dev = [
 [tool.ruff]
 target-version = "py313"
 line-length = 120
-extend-exclude = ["migrations"]
+extend-exclude = ["migrations", "docs"]
+
+[tool.ruff.format]
+# Keep existing quote characters — formatting normalizes whitespace only.
+quote-style = "preserve"
 
 [tool.ruff.lint]
 # Pinned deliberately: installed ruff's defaults are wider (I, RUF, SIM, ...)
