@@ -1,5 +1,4 @@
 from drf_spectacular.utils import (
-    OpenApiResponse,
     extend_schema,
     inline_serializer,
 )
@@ -12,11 +11,7 @@ from apps.accounts.authentication import CustomJWTAuthentication
 from . import services
 from .models import BusinessStream, Company, CompanyImages
 from .serializers import BusinessStreamSerializer, CompanySerializer, CompanyImagesSerializer
-from .permissions import (
-    IsAdminOrReadOnly,
-    IsCompanyOwnerOrAdmin,
-    IsCompanyOwnerForImages
-)
+from .permissions import IsAdminOrReadOnly, IsCompanyOwnerOrAdmin, IsCompanyOwnerForImages
 
 
 _CompanyDashboardSerializer = inline_serializer(
@@ -28,8 +23,10 @@ _CompanyDashboardSerializer = inline_serializer(
 )
 
 _CompaniesErrorSerializer = inline_serializer(
-    name='CompaniesError', fields={'error': drf_serializers.CharField()},
+    name='CompaniesError',
+    fields={'error': drf_serializers.CharField()},
 )
+
 
 # Create your views here.
 class BusinessStreamViewSet(viewsets.ModelViewSet):
@@ -38,6 +35,7 @@ class BusinessStreamViewSet(viewsets.ModelViewSet):
     - Everyone can view business streams
     - Only admins can create/update/delete business streams
     """
+
     queryset = BusinessStream.objects.all()
     serializer_class = BusinessStreamSerializer
     authentication_classes = [CustomJWTAuthentication]
@@ -51,11 +49,12 @@ class CompanyViewSet(viewsets.ModelViewSet):
     - Company owners can create and manage their own company
     - Admins can manage all companies
     """
+
     queryset = Company.objects.all()
     serializer_class = CompanySerializer
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [IsCompanyOwnerOrAdmin]
-    
+
     def get_queryset(self):
         """Admins → all; company → their own; else → active companies."""
         qs = Company.objects.with_related()
@@ -65,7 +64,7 @@ class CompanyViewSet(viewsets.ModelViewSet):
         if user.user_type == 'company':
             return qs.for_user(user)
         return qs.active()
-    
+
     def perform_create(self, serializer):
         """Automatically assign the current user as the company owner.
 
@@ -74,12 +73,11 @@ class CompanyViewSet(viewsets.ModelViewSet):
         letting the OneToOne IntegrityError turn into a 500.
         """
         from rest_framework.exceptions import PermissionDenied, ValidationError
+
         if self.request.user.user_type != 'company':
             raise PermissionDenied("Only company users can create companies")
         if Company.objects.filter(user_account=self.request.user).exists():
-            raise ValidationError(
-                {'detail': 'Profile already exists. Use PATCH to update.'}
-            )
+            raise ValidationError({'detail': 'Profile already exists. Use PATCH to update.'})
         serializer.save(user_account=self.request.user)
 
 
@@ -90,11 +88,12 @@ class CompanyImagesViewSet(viewsets.ModelViewSet):
     - Company owners can upload/manage their company's images
     - Admins can manage all images
     """
+
     queryset = CompanyImages.objects.all()
     serializer_class = CompanyImagesSerializer
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [IsCompanyOwnerForImages]
-    
+
     def get_queryset(self):
         """Admins → all; company → their own; else → active companies' images."""
         qs = CompanyImages.objects.with_related()

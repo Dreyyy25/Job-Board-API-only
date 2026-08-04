@@ -26,6 +26,14 @@ A `.env` file is required at the repo root. Required keys: `SECRET_KEY`, `DB_NAM
 
 All env access goes through `config.py` at the repo root. `jobApp/settings.py` and `jobApp/urls.py` import plain Python constants from it. Do **not** add new `os.getenv()` calls scattered through the codebase — extend `config.py` instead.
 
+## CI and git workflow
+
+CI is a single GitHub Actions job (`ci` in `.github/workflows/ci.yml`) that runs on every PR and on pushes to `staging`/`main`: `ruff check`, `ruff format --check`, `makemigrations --check --dry-run`, `spectacular --validate --fail-on-warn`, production `check --deploy`, and the full test suite against a `postgres:18` service. All env values in the workflow are dummies — it uses no secrets, so Dependabot/fork PRs are safe. The test step uses `--keepdb` deliberately: the runner is discarded, and skipping the teardown `DROP DATABASE` sidesteps the autovacuum race described above. Never add `ai_smoke` (billable) or `ai_checkpointer_setup` (deploy step) to CI.
+
+Ruff is the linter/formatter: `uv run ruff check .` and `uv run ruff format .` locally before pushing. Lint rules are pinned to `E4/E7/E9/F` in `pyproject.toml` — don't widen the selection casually; ruff's own defaults are broader and will flood the diff. The one-time format-normalization commit is listed in `.git-blame-ignore-revs` (GitHub's blame view respects it automatically; locally run `git config blame.ignoreRevsFile .git-blame-ignore-revs` once).
+
+`staging` and `main` are protected by rulesets: changes land via PR with a green `ci` check — direct pushes are rejected, force pushes and deletions blocked, and the only merge method is a merge commit. Consequence: `staging` → `main` promotions are PRs, `main` gains one merge commit per promotion, and the two branches are no longer SHA-identical — that is expected, not drift. Merged head branches auto-delete on GitHub; prune locally with `git fetch --prune`.
+
 ## Architecture
 
 Django 5.2 + DRF monolith with JWT auth. Four domain apps under `apps/`, each mounted under `/api/v1/<app>/` by `jobApp/urls.py`. The admin URL path is read from the `ADMIN_URL` env var (default `admin/`).

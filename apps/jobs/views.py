@@ -1,5 +1,4 @@
 from drf_spectacular.utils import (
-    OpenApiParameter,
     OpenApiResponse,
     extend_schema,
     inline_serializer,
@@ -18,15 +17,13 @@ from . import services
 from .filters import JobPostFilter
 from .models import JobType, JobLocation, JobPost, JobPostActivity, JobPostSkillSet
 from .serializers import (
-    JobTypeSerializer, JobLocationSerializer, JobPostSerializer,
-    JobPostActivitySerializer, JobPostSkillSetSerializer
+    JobTypeSerializer,
+    JobLocationSerializer,
+    JobPostSerializer,
+    JobPostActivitySerializer,
+    JobPostSkillSetSerializer,
 )
-from .permissions import (
-    IsAdminOrReadOnly,
-    IsJobPosterOrAdmin,
-    IsApplicantOrCompanyOrAdmin,
-    CanManageJobSkills
-)
+from .permissions import IsAdminOrReadOnly, IsJobPosterOrAdmin, IsApplicantOrCompanyOrAdmin, CanManageJobSkills
 
 
 _ApplyRequestSerializer = inline_serializer(
@@ -37,7 +34,8 @@ _ApplyRequestSerializer = inline_serializer(
         ),
         'job_post': drf_serializers.UUIDField(),
         'cover_letter': drf_serializers.CharField(
-            required=False, allow_blank=True,
+            required=False,
+            allow_blank=True,
         ),
     },
 )
@@ -51,7 +49,8 @@ _ApplyResponseSerializer = inline_serializer(
 )
 
 _JobsErrorSerializer = inline_serializer(
-    name='JobsError', fields={'error': drf_serializers.CharField()},
+    name='JobsError',
+    fields={'error': drf_serializers.CharField()},
 )
 
 
@@ -62,6 +61,7 @@ class JobTypeViewSet(viewsets.ModelViewSet):
     - Everyone can view job types
     - Only admins can create/update/delete job types
     """
+
     queryset = JobType.objects.all()
     serializer_class = JobTypeSerializer
     authentication_classes = [CustomJWTAuthentication]
@@ -75,6 +75,7 @@ class JobLocationViewSet(viewsets.ModelViewSet):
     - Authenticated users (companies) can create locations
     - Admins can manage all locations
     """
+
     queryset = JobLocation.objects.all()
     serializer_class = JobLocationSerializer
     authentication_classes = [CustomJWTAuthentication]
@@ -88,6 +89,7 @@ class JobPostViewSet(viewsets.ModelViewSet):
     - Company owners can create and manage their own job posts
     - Admins can manage all job posts
     """
+
     queryset = JobPost.objects.filter(is_published=True, is_active=True)
     serializer_class = JobPostSerializer
     authentication_classes = [CustomJWTAuthentication]
@@ -110,7 +112,7 @@ class JobPostViewSet(viewsets.ModelViewSet):
         if user.is_authenticated and user.user_type == 'company':
             return qs.for_company(user)
         return qs.published()
-    
+
     def perform_create(self, serializer):
         """
         Automatically assign the job to the company of the current user.
@@ -118,15 +120,18 @@ class JobPostViewSet(viewsets.ModelViewSet):
         """
         if self.request.user.user_type != 'company':
             from rest_framework.exceptions import PermissionDenied
+
             raise PermissionDenied("Only company users can create job posts")
-        
+
         # Get the company profile for this user
         from apps.companies.models import Company
+
         try:
             company = Company.objects.get(user_account=self.request.user)
             serializer.save(company=company)
         except Company.DoesNotExist:
             from rest_framework.exceptions import ValidationError
+
             raise ValidationError("You must create a company profile before posting jobs")
 
 
@@ -137,11 +142,12 @@ class JobPostActivityViewSet(viewsets.ModelViewSet):
     - Company owners can view applications to their jobs
     - Admins can view all applications
     """
+
     queryset = JobPostActivity.objects.all()
     serializer_class = JobPostActivitySerializer
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [IsApplicantOrCompanyOrAdmin]
-    
+
     def get_queryset(self):
         """Admins → all; seekers → own; company → applications to their jobs; else → none."""
         qs = JobPostActivity.objects.with_related()
@@ -162,11 +168,12 @@ class JobPostSkillSetViewSet(viewsets.ModelViewSet):
     - Company owners can manage skills for their job posts
     - Admins can manage all skills
     """
+
     queryset = JobPostSkillSet.objects.all()
     serializer_class = JobPostSkillSetSerializer
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [CanManageJobSkills]
-    
+
     def get_queryset(self):
         """Admins → all; company → their jobs' skills; else → published-job skills."""
         qs = JobPostSkillSet.objects.with_related()
@@ -204,16 +211,17 @@ def apply_for_job(request):
     except services.InvalidApplicantError as e:
         return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
     except services.JobNotAvailableError:
-        return Response({'error': 'Job not found or not available'},
-                        status=status.HTTP_404_NOT_FOUND)
+        return Response({'error': 'Job not found or not available'}, status=status.HTTP_404_NOT_FOUND)
     except services.AlreadyAppliedError:
-        return Response({'error': 'You have already applied for this job'},
-                        status=status.HTTP_400_BAD_REQUEST)
+        return Response({'error': 'You have already applied for this job'}, status=status.HTTP_400_BAD_REQUEST)
 
-    return Response({
-        'message': 'Application submitted successfully',
-        'data': JobPostActivitySerializer(activity).data,
-    }, status=status.HTTP_201_CREATED)
+    return Response(
+        {
+            'message': 'Application submitted successfully',
+            'data': JobPostActivitySerializer(activity).data,
+        },
+        status=status.HTTP_201_CREATED,
+    )
 
 
 @extend_schema(
@@ -231,8 +239,7 @@ def job_applications(request, job_id):
     try:
         apps_qs = services.applications_for_job(request.user, job_id)
     except services.JobNotFoundError:
-        return Response({'error': 'Job not found'},
-                        status=status.HTTP_404_NOT_FOUND)
+        return Response({'error': 'Job not found'}, status=status.HTTP_404_NOT_FOUND)
     except services.DashboardPermissionError as e:
         return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
     return Response(JobPostActivitySerializer(apps_qs, many=True).data)

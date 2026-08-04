@@ -1,4 +1,5 @@
 """Service layer for AI features. Views translate domain exceptions to HTTP."""
+
 import base64
 import html
 import logging
@@ -70,8 +71,7 @@ def _invoke_structured(model, schema, prompt, usage_sink):
 
     Returns the parsed instance.
     """
-    structured = model.with_structured_output(
-        schema, method='json_schema', include_raw=True)
+    structured = model.with_structured_output(schema, method='json_schema', include_raw=True)
     last_error = None
     for attempt in range(2):
         started = time.monotonic()
@@ -79,8 +79,7 @@ def _invoke_structured(model, schema, prompt, usage_sink):
             result = structured.invoke(prompt)
         except Exception as exc:
             last_error = _classify_provider_error(exc)
-            logger.warning('ai provider error attempt=%s cls=%s', attempt,
-                           type(exc).__name__)
+            logger.warning('ai provider error attempt=%s cls=%s', attempt, type(exc).__name__)
             if isinstance(last_error, AIQuotaExceededError):
                 raise last_error
             continue
@@ -114,8 +113,7 @@ def _fetch_applications(job_post):
     relations must be prefetched explicitly or dossier assembly becomes an N+1.
     """
     return list(
-        JobPostActivity.objects
-        .filter(job_post=job_post)
+        JobPostActivity.objects.filter(job_post=job_post)
         .with_related()
         .prefetch_related(
             'user_account__seeker_profile',
@@ -156,8 +154,7 @@ def _build_dossier(label, activity):
     user = activity.user_account
     lines = [f"{label}:", f"Name: {_seeker_name(user) or 'Not provided'}"]
 
-    skills = [f"{s.skill_set.skill_name} ({s.skill_level})"
-              for s in list(user.skills.all())[:MAX_DOSSIER_SKILLS]]
+    skills = [f"{s.skill_set.skill_name} ({s.skill_level})" for s in list(user.skills.all())[:MAX_DOSSIER_SKILLS]]
     lines.append("Skills: " + (", ".join(skills) or "none listed"))
 
     for edu in list(user.education.all())[:MAX_DOSSIER_EDUCATION]:
@@ -165,8 +162,7 @@ def _build_dossier(label, activity):
         lines.append(
             f"Education: {edu.degree_type or 'Unspecified'} in "
             f"{edu.field_of_study or 'unspecified field'} at "
-            f"{edu.institute_university_name or 'unnamed institution'}"
-            + (f" ({span})" if span else "")
+            f"{edu.institute_university_name or 'unnamed institution'}" + (f" ({span})" if span else "")
         )
 
     for exp in list(user.experiences.all())[:MAX_DOSSIER_EXPERIENCE]:
@@ -198,8 +194,7 @@ def _record_usage(feature, user, model, usage_sink):
         )
 
 
-def generate_job_post_draft(user, *, notes, job_type=None, location_hint='',
-                            model=None):
+def generate_job_post_draft(user, *, notes, job_type=None, location_hint='', model=None):
     """Draft a job post from rough notes. Creates nothing but the usage log.
 
     Returns {'job_title', 'job_description', 'suggested_skills': [
@@ -235,12 +230,14 @@ def generate_job_post_draft(user, *, notes, job_type=None, location_hint='',
         skill = by_name.get(item.skill_name.strip().lower())
         if skill is None:
             continue  # invented by the model
-        suggested.append({
-            'skill_set_id': str(skill.id),
-            'skill_name': skill.skill_name,
-            'skill_level': item.skill_level,
-            'is_required': item.is_required,
-        })
+        suggested.append(
+            {
+                'skill_set_id': str(skill.id),
+                'skill_name': skill.skill_name,
+                'skill_level': item.skill_level,
+                'is_required': item.is_required,
+            }
+        )
 
     return {
         'job_title': draft.job_title,
@@ -274,8 +271,7 @@ def extract_resume(user, *, text='', file=None, model=None):
         pdf_b64 = base64.b64encode(file.read()).decode('ascii')
 
     model = model or get_model('flash')
-    prompt = build_resume_import_messages(
-        resume_text=text or None, pdf_b64=pdf_b64)
+    prompt = build_resume_import_messages(resume_text=text or None, pdf_b64=pdf_b64)
 
     usage_sink = []
     try:
@@ -294,11 +290,13 @@ def extract_resume(user, *, text='', file=None, model=None):
             if str(skill.id) in seen:
                 continue
             seen.add(str(skill.id))
-            skills.append({
-                'skill_set_id': str(skill.id),
-                'skill_name': skill.skill_name,
-                'skill_level': item.skill_level,
-            })
+            skills.append(
+                {
+                    'skill_set_id': str(skill.id),
+                    'skill_name': skill.skill_name,
+                    'skill_level': item.skill_level,
+                }
+            )
         elif name.lower() not in seen_suggestions:
             seen_suggestions.add(name.lower())
             suggestions.append(name)
@@ -328,8 +326,7 @@ def _has_newer_application(job_post, since):
     Deliberately a timestamp comparison, not a count — withdraw-plus-reapply
     leaves the count unchanged and would keep serving a stale report.
     """
-    return JobPostActivity.objects.filter(
-        job_post=job_post, application_date__gt=since).exists()
+    return JobPostActivity.objects.filter(job_post=job_post, application_date__gt=since).exists()
 
 
 def _screening_response(job_post, report, *, cached):
@@ -352,10 +349,9 @@ def screen_applicants(user, *, job_post_id, refresh=False, model=None):
     ScreeningReport and its usage log — applications are never mutated.
     """
     try:
-        job_post = (JobPost.objects
-                    .select_related('company')
-                    .prefetch_related('required_skills__skill_set')
-                    .get(id=job_post_id))
+        job_post = (
+            JobPost.objects.select_related('company').prefetch_related('required_skills__skill_set').get(id=job_post_id)
+        )
     except (JobPost.DoesNotExist, ValidationError, ValueError):
         raise JobPostNotFoundError()
 
@@ -377,26 +373,21 @@ def screen_applicants(user, *, job_post_id, refresh=False, model=None):
     if total_applicants == 0:
         raise NoApplicantsError()
 
-    latest = (ScreeningReport.objects
-              .filter(job_post=job_post).order_by('-created_at').first())
-    if latest is not None and not refresh and not _has_newer_application(
-            job_post, latest.created_at):
+    latest = ScreeningReport.objects.filter(job_post=job_post).order_by('-created_at').first()
+    if latest is not None and not refresh and not _has_newer_application(job_post, latest.created_at):
         return _screening_response(job_post, latest, cached=True)
 
     applications = _fetch_applications(job_post)
-    labels = {f"candidate_{i}": activity
-              for i, activity in enumerate(applications, start=1)}
+    labels = {f"candidate_{i}": activity for i, activity in enumerate(applications, start=1)}
 
     prompt = build_screening_prompt(
         job_title=job_post.job_title,
         job_description=job_post.job_description,
         required_skills=[
-            f"{s.skill_set.skill_name} ({s.skill_level}, "
-            f"{'required' if s.is_required else 'nice-to-have'})"
+            f"{s.skill_set.skill_name} ({s.skill_level}, {'required' if s.is_required else 'nice-to-have'})"
             for s in job_post.required_skills.all()
         ],
-        dossiers=[_build_dossier(label, activity)
-                  for label, activity in labels.items()],
+        dossiers=[_build_dossier(label, activity) for label, activity in labels.items()],
     )
 
     model = model or get_model('pro')
@@ -412,15 +403,17 @@ def screen_applicants(user, *, job_post_id, refresh=False, model=None):
         if activity is None or activity.id in seen:
             continue  # label the service never issued, or a duplicate
         seen.add(activity.id)
-        candidates.append({
-            'application_id': str(activity.id),
-            'applicant_id': str(activity.user_account_id),
-            'applicant_name': _seeker_name(activity.user_account),
-            'score': max(0, min(100, item.score)),
-            'strengths': list(item.strengths),
-            'gaps': list(item.gaps),
-            'summary': item.summary,
-        })
+        candidates.append(
+            {
+                'application_id': str(activity.id),
+                'applicant_id': str(activity.user_account_id),
+                'applicant_name': _seeker_name(activity.user_account),
+                'score': max(0, min(100, item.score)),
+                'strengths': list(item.strengths),
+                'gaps': list(item.gaps),
+                'summary': item.summary,
+            }
+        )
 
     # Deterministic ranking — no second LLM call. Name then id break ties so
     # the same inputs always produce the same order.
@@ -428,8 +421,7 @@ def screen_applicants(user, *, job_post_id, refresh=False, model=None):
     for rank, candidate in enumerate(candidates, start=1):
         candidate['rank'] = rank
 
-    logger.info('ai screening job_post=%s screened=%s returned=%s',
-                job_post.id, len(applications), len(candidates))
+    logger.info('ai screening job_post=%s screened=%s returned=%s', job_post.id, len(applications), len(candidates))
 
     report = ScreeningReport.objects.create(
         job_post=job_post,
@@ -497,9 +489,30 @@ CHAT_MAX_OUTPUT_TOKENS = 1024
 # let `<img/src="//host/p?d=...">`, `<svg/onload=...>`, `<div/onmouseover=...>`
 # and friends walk straight through both branches.
 _DANGEROUS_TAG_NAMES = (
-    'img', 'script', 'iframe', 'object', 'embed', 'source', 'video', 'audio',
-    'link', 'a', 'form', 'input', 'svg', 'style', 'base', 'meta', 'track',
-    'picture', 'image', 'body', 'frame', 'frameset', 'portal', 'button',
+    'img',
+    'script',
+    'iframe',
+    'object',
+    'embed',
+    'source',
+    'video',
+    'audio',
+    'link',
+    'a',
+    'form',
+    'input',
+    'svg',
+    'style',
+    'base',
+    'meta',
+    'track',
+    'picture',
+    'image',
+    'body',
+    'frame',
+    'frameset',
+    'portal',
+    'button',
     'use',
 )
 # Attributes that can fetch, navigate, or execute. Used by the unlisted-name
@@ -510,9 +523,26 @@ _DANGEROUS_TAG_NAMES = (
 # needs >=5 characters total, so ordinary prose words that merely start with
 # "on" (`one=1`) can never masquerade as a handler.
 _DANGEROUS_ATTR_NAMES = (
-    r'on[a-zA-Z]{3,}', 'xlink:href', 'formaction', 'background', 'longdesc',
-    'manifest', 'codebase', 'archive', 'srcset', 'usemap', 'poster', 'action',
-    'dynsrc', 'lowsrc', 'style', 'href', 'data', 'cite', 'ping', 'src',
+    r'on[a-zA-Z]{3,}',
+    'xlink:href',
+    'formaction',
+    'background',
+    'longdesc',
+    'manifest',
+    'codebase',
+    'archive',
+    'srcset',
+    'usemap',
+    'poster',
+    'action',
+    'dynsrc',
+    'lowsrc',
+    'style',
+    'href',
+    'data',
+    'cite',
+    'ping',
+    'src',
 )
 # The unlisted-name branch used to be `<name\s[^<>]*=[^<>]*/?>` — "any tag
 # with an `=` anywhere between the brackets". That over-matched badly, because
@@ -533,9 +563,9 @@ _DANGEROUS_ATTR_NAMES = (
 _HTML_TAG_RE = re.compile(
     r'</?(?:' + '|'.join(_DANGEROUS_TAG_NAMES) + r')(?:[\s/][^<>]*)?/?>'
     r'|<[a-zA-Z][a-zA-Z0-9]*[\s/]+'
-    r'(?:[^\s<>=/]+=|(?:[^<>\n]*?[\s/])?(?:' +
-    '|'.join(_DANGEROUS_ATTR_NAMES) + r')[ \t]*=)[^<>\n]*>',
-    re.IGNORECASE)
+    r'(?:[^\s<>=/]+=|(?:[^<>\n]*?[\s/])?(?:' + '|'.join(_DANGEROUS_ATTR_NAMES) + r')[ \t]*=)[^<>\n]*>',
+    re.IGNORECASE,
+)
 # A single .sub() pass can leave a dangerous tag half-assembled:
 # "<scr<img src=x>ipt>" loses the inner <img ...> tag in one pass, which
 # reassembles "<script>" from the surviving "<scr" + "ipt>" fragments —
@@ -555,8 +585,7 @@ _MD_LINK_RE = re.compile(r'\[([^\]]*)\]\([^)]*\)')
 _BARE_URL_RE = re.compile(r'\b[a-zA-Z][a-zA-Z0-9+.-]*://\S+')
 # GitHub-flavoured markdown (and most chat renderers) autolink a bare
 # `www.host.tld` even with no scheme and no leading slashes at all.
-_WWW_URL_RE = re.compile(r'\bwww\.[\w-]+(?:\.[\w-]+)+(?:[/?#]\S*)?',
-                         re.IGNORECASE)
+_WWW_URL_RE = re.compile(r'\bwww\.[\w-]+(?:\.[\w-]+)+(?:[/?#]\S*)?', re.IGNORECASE)
 # Scheme-relative (`//host/...`): browsers resolve these against the current
 # page scheme, so they fire a cross-origin request exactly like a full URL.
 # Requires a DOT-BEARING host after the "//" before deleting anything, so
@@ -568,8 +597,7 @@ _WWW_URL_RE = re.compile(r'\bwww\.[\w-]+(?:\.[\w-]+)+(?:[/?#]\S*)?',
 # group excludes the same closing delimiters as the old bare-URL matcher
 # (`)`, `]`, `>`, quotes) so a URL parenthesised or quoted in prose doesn't
 # swallow its own closing delimiter.
-_PROTOCOL_RELATIVE_URL_RE = re.compile(
-    r'//[\w-]+(?:\.[\w-]+)+(?:[/?#][^\s)\]>"\']*)?')
+_PROTOCOL_RELATIVE_URL_RE = re.compile(r'//[\w-]+(?:\.[\w-]+)+(?:[/?#][^\s)\]>"\']*)?')
 # Collapses runs of spaces/tabs, but only mid-line: the lookbehind requires a
 # non-whitespace character immediately before the run, so leading indentation
 # on a line (fenced code, nested markdown lists) is never touched.
@@ -606,8 +634,7 @@ def _strip_dangerous_tags(text):
         text = stripped
     if not _HTML_TAG_RE.search(text):
         return text
-    logger.warning('ai chat sanitizer hit the tag-strip pass bound; '
-                   'falling back to removing all residual markup')
+    logger.warning('ai chat sanitizer hit the tag-strip pass bound; falling back to removing all residual markup')
     while True:
         stripped = _ANY_TAG_RE.sub('', text)
         if stripped == text:
@@ -681,7 +708,7 @@ def _turn_usage(messages):
     after a failed turn, which still persists its HumanMessage.
     """
     indexes = [i for i, m in enumerate(messages) if isinstance(m, HumanMessage)]
-    tail = messages[indexes[-1] + 1:] if indexes else messages
+    tail = messages[indexes[-1] + 1 :] if indexes else messages
     totals = {'input_tokens': 0, 'output_tokens': 0}
     for message in tail:
         if isinstance(message, AIMessage) and message.usage_metadata:
@@ -695,8 +722,7 @@ def _stored_messages(checkpointer, config):
     try:
         snapshot = checkpointer.get_tuple(config)
     except Exception:  # pragma: no cover - bookkeeping must not mask the error
-        logger.exception(
-            'ai chat: checkpointer read failed; treating thread as empty')
+        logger.exception('ai chat: checkpointer read failed; treating thread as empty')
         return []
     if snapshot is None:
         return []
@@ -744,10 +770,8 @@ def _build_chat_agent(model, tools, checkpointer, deadline_at):
                 # ToolMessage. It may exceed CHAT_HISTORY_MESSAGES; that
                 # overflow is correct, since a turn cannot be truncated
                 # mid-sequence without breaking a tool-call/tool-result pair.
-                human_indexes = [i for i, m in enumerate(request.messages)
-                                 if isinstance(m, HumanMessage)]
-                trimmed = (request.messages[human_indexes[-1]:] if human_indexes
-                           else request.messages)
+                human_indexes = [i for i, m in enumerate(request.messages) if isinstance(m, HumanMessage)]
+                trimmed = request.messages[human_indexes[-1] :] if human_indexes else request.messages
             request = request.override(messages=trimmed)
         return handler(request)
 
@@ -773,15 +797,13 @@ def _build_chat_agent(model, tools, checkpointer, deadline_at):
             # synthetic AIMessage reading "Model call limits exceeded: run
             # limit (8/8)" — which would be returned to the user as their reply.
             ModelCallLimitMiddleware(
-                run_limit=MAX_MODEL_CALLS_PER_TURN,
-                thread_limit=MAX_MODEL_CALLS_PER_THREAD,
-                exit_behavior='error'),
+                run_limit=MAX_MODEL_CALLS_PER_TURN, thread_limit=MAX_MODEL_CALLS_PER_THREAD, exit_behavior='error'
+            ),
         ],
     )
 
 
-def send_chat_message(user, *, message, conversation_id=None, model=None,
-                      checkpointer=None):
+def send_chat_message(user, *, message, conversation_id=None, model=None, checkpointer=None):
     """One chat turn. Returns {'conversation_id': str, 'reply': str}.
 
     Read-only with respect to the domain: the agent's tools cannot write, so
@@ -796,16 +818,13 @@ def send_chat_message(user, *, message, conversation_id=None, model=None,
         except (Conversation.DoesNotExist, ValidationError, ValueError, TypeError):
             raise ConversationNotFoundError()
     else:
-        conversation = Conversation.objects.create(
-            user=user, title=message[:CONVERSATION_TITLE_CHARS])
+        conversation = Conversation.objects.create(user=user, title=message[:CONVERSATION_TITLE_CHARS])
         created_now = True
 
-    model = model or get_model('pro', timeout=CHAT_MODEL_TIMEOUT_SECONDS,
-                               max_output_tokens=CHAT_MAX_OUTPUT_TOKENS)
+    model = model or get_model('pro', timeout=CHAT_MODEL_TIMEOUT_SECONDS, max_output_tokens=CHAT_MAX_OUTPUT_TOKENS)
     checkpointer = checkpointer or get_checkpointer()
     started = time.monotonic()
-    agent = _build_chat_agent(
-        model, build_tools(user), checkpointer, started + CHAT_DEADLINE_SECONDS)
+    agent = _build_chat_agent(model, build_tools(user), checkpointer, started + CHAT_DEADLINE_SECONDS)
 
     config = {'configurable': {'thread_id': str(conversation.id)}}
     try:
@@ -825,8 +844,7 @@ def send_chat_message(user, *, message, conversation_id=None, model=None,
         except Exception:  # pragma: no cover - bookkeeping must not mask the original error
             # .exception(), not .warning(): a real DB outage here needs a
             # traceback to diagnose, not just a bare message.
-            logger.exception('ai chat: failed to record usage for a failed turn '
-                             'conversation=%s', conversation.id)
+            logger.exception('ai chat: failed to record usage for a failed turn conversation=%s', conversation.id)
         try:
             _rollback_new_conversation(conversation, checkpointer, created_now)
         except Exception:  # pragma: no cover - bookkeeping must not mask the original error
@@ -848,17 +866,25 @@ def send_chat_message(user, *, message, conversation_id=None, model=None,
     # model can return blocks, which would break the declared string contract.
     reply = _sanitize_reply(state['messages'][-1].text) if state['messages'] else ''
     # Ids and sizes only — never the message body (privacy rule).
-    logger.info('ai chat conversation=%s messages=%s reply_chars=%s',
-                conversation.id, len(state['messages']), len(reply))
+    logger.info(
+        'ai chat conversation=%s messages=%s reply_chars=%s', conversation.id, len(state['messages']), len(reply)
+    )
     return {'conversation_id': str(conversation.id), 'reply': reply}
 
 
 def _record_turn_usage(user, model, messages, started):
     """One AIUsageLog row for this turn — on the failure path too."""
-    _record_usage(AIUsageLog.Feature.CHAT, user, model, [{
-        'usage': _turn_usage(messages),
-        'latency_ms': int((time.monotonic() - started) * 1000),
-    }])
+    _record_usage(
+        AIUsageLog.Feature.CHAT,
+        user,
+        model,
+        [
+            {
+                'usage': _turn_usage(messages),
+                'latency_ms': int((time.monotonic() - started) * 1000),
+            }
+        ],
+    )
 
 
 def _rollback_new_conversation(conversation, checkpointer, created_now):
@@ -903,8 +929,7 @@ def list_conversations(user):
             'title': row['title'],
             'created_at': row['created_at'].isoformat(),
         }
-        for row in Conversation.objects.filter(user=user).values(
-            'id', 'title', 'created_at')[:MAX_LISTED_CONVERSATIONS]
+        for row in Conversation.objects.filter(user=user).values('id', 'title', 'created_at')[:MAX_LISTED_CONVERSATIONS]
     ]
 
 

@@ -5,6 +5,7 @@ Services bind these via with_structured_output(Schema, method="json_schema")
 The LLM returns skill *names*, never UUIDs — the service maps names to real
 SkillSet rows and drops inventions.
 """
+
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -20,15 +21,20 @@ class SuggestedSkillDraft(BaseModel):
 
 class JobPostDraft(BaseModel):
     job_title: str = Field(description="Concise job title, max ~120 characters.")
-    job_description: str = Field(
-        description="Full description including responsibilities and requirements prose.")
+    job_description: str = Field(description="Full description including responsibilities and requirements prose.")
     suggested_skills: list[SuggestedSkillDraft] = Field(
-        description="3-8 skills strictly from the provided taxonomy list.")
+        description="3-8 skills strictly from the provided taxonomy list."
+    )
 
 
 DegreeType = Literal[
-    'High School', 'Associate', 'Bachelor', 'Master', 'PhD',
-    'Certificate', 'Diploma',
+    'High School',
+    'Associate',
+    'Bachelor',
+    'Master',
+    'PhD',
+    'Certificate',
+    'Diploma',
 ]
 
 # Date fields are plain str, NOT datetime.date: langchain-google-genai strips
@@ -39,16 +45,14 @@ DegreeType = Literal[
 
 class EducationEntry(BaseModel):
     institute_university_name: str = Field(description="Institution name as written in the resume.")
-    degree_type: DegreeType | None = Field(
-        description="Closest matching degree type, or null if unclear.")
+    degree_type: DegreeType | None = Field(description="Closest matching degree type, or null if unclear.")
     field_of_study: str = Field(description="Major/field, empty string if absent.")
     academic_details: str = Field(description="Honors, thesis, or notes; empty string if absent.")
-    percentage: float | None = Field(
-        description="Grade as a 0-100 number ONLY if explicitly stated, else null.")
-    start_date: str | None = Field(
-        description="ISO date YYYY-MM-DD; year-only becomes YYYY-01-01; null if absent.")
+    percentage: float | None = Field(description="Grade as a 0-100 number ONLY if explicitly stated, else null.")
+    start_date: str | None = Field(description="ISO date YYYY-MM-DD; year-only becomes YYYY-01-01; null if absent.")
     end_date: str | None = Field(
-        description="ISO date YYYY-MM-DD; year-only becomes YYYY-01-01; null if absent or ongoing.")
+        description="ISO date YYYY-MM-DD; year-only becomes YYYY-01-01; null if absent or ongoing."
+    )
 
 
 class ExperienceEntry(BaseModel):
@@ -57,16 +61,13 @@ class ExperienceEntry(BaseModel):
     description: str = Field(description="Responsibilities/achievements; empty string if absent.")
     job_location_city: str = Field(description="City, empty string if absent.")
     job_location_country: str = Field(description="Country, empty string if absent.")
-    start_date: str | None = Field(
-        description="ISO date YYYY-MM-DD; year-only becomes YYYY-01-01; null if absent.")
-    end_date: str | None = Field(
-        description="ISO date YYYY-MM-DD; null if absent or current role.")
+    start_date: str | None = Field(description="ISO date YYYY-MM-DD; year-only becomes YYYY-01-01; null if absent.")
+    end_date: str | None = Field(description="ISO date YYYY-MM-DD; null if absent or current role.")
 
 
 class ResumeSkill(BaseModel):
     skill_name: str = Field(description="One skill as named in the resume.")
-    skill_level: SkillLevel = Field(
-        description="Proficiency estimated from context; Intermediate when unclear.")
+    skill_level: SkillLevel = Field(description="Proficiency estimated from context; Intermediate when unclear.")
 
 
 class ResumeExtract(BaseModel):
@@ -81,17 +82,14 @@ class ResumeExtract(BaseModel):
 
 
 class CandidateAssessment(BaseModel):
-    candidate_ref: str = Field(
-        description="The candidate label exactly as given in the prompt, e.g. candidate_3.")
-    score: int = Field(
-        description="Fit score for THIS job, 0-100. 80+ strong, 50-79 partial, below 50 weak.")
-    strengths: list[str] = Field(
-        description="2-4 short concrete strengths, each grounded in the dossier text.")
-    gaps: list[str] = Field(
-        description="1-4 short concrete gaps against the job's requirements.")
+    candidate_ref: str = Field(description="The candidate label exactly as given in the prompt, e.g. candidate_3.")
+    score: int = Field(description="Fit score for THIS job, 0-100. 80+ strong, 50-79 partial, below 50 weak.")
+    strengths: list[str] = Field(description="2-4 short concrete strengths, each grounded in the dossier text.")
+    gaps: list[str] = Field(description="1-4 short concrete gaps against the job's requirements.")
     summary: str = Field(description="Two-sentence hiring summary for this candidate.")
 
 
 class ScreeningResult(BaseModel):
     candidates: list[CandidateAssessment] = Field(
-        description="Exactly one entry per candidate label supplied in the prompt.")
+        description="Exactly one entry per candidate label supplied in the prompt."
+    )

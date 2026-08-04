@@ -1,4 +1,5 @@
 """Service layer for the companies app."""
+
 from .models import Company, CompanyImages
 
 
@@ -20,9 +21,7 @@ def build_company_dashboard(requester, user_id):
     is_owner = str(requester.id) == str(user_id)
     is_admin = requester.is_staff or requester.is_superuser
     if not (is_owner or is_admin):
-        raise DashboardPermissionError(
-            'You do not have permission to access this dashboard'
-        )
+        raise DashboardPermissionError('You do not have permission to access this dashboard')
 
     try:
         company = Company.objects.with_related().get(user_account_id=user_id)
@@ -30,6 +29,7 @@ def build_company_dashboard(requester, user_id):
         raise CompanyNotFoundError('Company not found')
 
     from .serializers import CompanyImagesSerializer, CompanySerializer
+
     images = CompanyImages.objects.filter(company=company).select_related('company')
 
     return {

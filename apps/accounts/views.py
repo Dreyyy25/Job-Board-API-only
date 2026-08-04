@@ -90,10 +90,12 @@ class RegisterThrottle(AnonRateThrottle):
 class LoginThrottle(AnonRateThrottle):
     scope = 'login'
 
+
 # Create your views here.
 # ViewSets for CRUD operations
 class UserAccountViewSet(viewsets.ModelViewSet):
     """API for managing user accounts"""
+
     queryset = UserAccount.objects.all()
     serializer_class = UserAccountSerializer
     permission_classes = [IsAuthenticated, IsOwnerOrAdmin]
@@ -106,14 +108,14 @@ class UserAccountViewSet(viewsets.ModelViewSet):
         - Regular users only see their own account
         """
         user = self.request.user
-        
+
         # Admins can see all accounts
         if user.is_staff or user.is_superuser:
             return UserAccount.objects.all()
-        
+
         # Regular users only see their own account
         return UserAccount.objects.filter(id=user.id)
-    
+
     def perform_create(self, serializer):
         """Override create to hash password"""
         password = serializer.validated_data.get('password')
@@ -121,7 +123,7 @@ class UserAccountViewSet(viewsets.ModelViewSet):
             serializer.save(password=make_password(password))
         else:
             serializer.save()
-    
+
     def perform_update(self, serializer):
         """Override update to hash password if provided"""
         password = serializer.validated_data.get('password')
@@ -129,6 +131,7 @@ class UserAccountViewSet(viewsets.ModelViewSet):
             serializer.save(password=make_password(password))
         else:
             serializer.save()
+
 
 # Registration endpoint
 def _serialize_profile(user):
@@ -140,10 +143,12 @@ def _serialize_profile(user):
     """
     if user.user_type == 'job_seeker':
         from apps.seekers.serializers import SeekerProfileSerializer
+
         profile = getattr(user, 'seeker_profile', None)
         return SeekerProfileSerializer(profile).data if profile else None
     if user.user_type == 'company':
         from apps.companies.serializers import CompanySerializer
+
         profile = getattr(user, 'company_profile', None)
         return CompanySerializer(profile).data if profile else None
     return None
@@ -182,24 +187,25 @@ def register(request):
             email=data['email'],
             password=data['password'],
             user_type=data['user_type'],
-            **{k: v for k, v in data.items()
-               if k not in {'email', 'password', 'user_type'}},
+            **{k: v for k, v in data.items() if k not in {'email', 'password', 'user_type'}},
         )
     except DjangoValidationError as e:
-        return Response({'password': list(e.messages)},
-                        status=status.HTTP_400_BAD_REQUEST)
+        return Response({'password': list(e.messages)}, status=status.HTTP_400_BAD_REQUEST)
 
     refresh_token = tokens.pop('refresh')
-    response = Response({
-        'message': 'User created successfully',
-        'user': {
-            'id': str(user.id),
-            'email': user.email,
-            'user_type': user.user_type,
+    response = Response(
+        {
+            'message': 'User created successfully',
+            'user': {
+                'id': str(user.id),
+                'email': user.email,
+                'user_type': user.user_type,
+            },
+            'tokens': tokens,
+            'profile': _serialize_profile(user),
         },
-        'tokens': tokens,
-        'profile': _serialize_profile(user),
-    }, status=status.HTTP_201_CREATED)
+        status=status.HTTP_201_CREATED,
+    )
     set_refresh_cookie(response, refresh_token)
     return response
 
@@ -229,27 +235,29 @@ def login(request):
     password = request.data.get('password')
 
     if not email or not password:
-        return Response({'error': 'Email and password are required'},
-                        status=status.HTTP_400_BAD_REQUEST)
+        return Response({'error': 'Email and password are required'}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
         user, tokens = services.login_user(email, password)
     except services.InvalidCredentialsError:
-        return Response({'error': 'Invalid credentials'},
-                        status=status.HTTP_401_UNAUTHORIZED)
+        return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
 
     refresh_token = tokens.pop('refresh')
-    response = Response({
-        'message': 'Login successful',
-        'user': {
-            'id': str(user.id),
-            'email': user.email,
-            'user_type': user.user_type,
+    response = Response(
+        {
+            'message': 'Login successful',
+            'user': {
+                'id': str(user.id),
+                'email': user.email,
+                'user_type': user.user_type,
+            },
+            'tokens': tokens,
         },
-        'tokens': tokens,
-    }, status=status.HTTP_200_OK)
+        status=status.HTTP_200_OK,
+    )
     set_refresh_cookie(response, refresh_token)
     return response
+
 
 # Current user's account endpoint
 @extend_schema(
@@ -268,15 +276,15 @@ def login(request):
 def me(request):
     """Get or update current user's account"""
     user = request.user
-    
+
     if request.method == 'GET':
         serializer = UserAccountSerializer(user)
         return Response(serializer.data)
-    
+
     elif request.method in ['PUT', 'PATCH']:
         partial = request.method == 'PATCH'
         serializer = UserAccountSerializer(user, data=request.data, partial=partial)
-        
+
         if serializer.is_valid():
             # Hash password if provided
             password = serializer.validated_data.get('password')
@@ -286,6 +294,7 @@ def me(request):
                 serializer.save()
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
 
 # Logout endpoint
 @extend_schema(
@@ -306,8 +315,7 @@ def logout(request):
         services.logout_user(refresh_token)
     except services.InvalidTokenError as e:
         msg = str(e) or 'invalid or expired refresh token'
-        response = Response({'error': msg},
-                        status=status.HTTP_400_BAD_REQUEST)
+        response = Response({'error': msg}, status=status.HTTP_400_BAD_REQUEST)
         delete_refresh_cookie(response)
         return response
     response = Response(status=status.HTTP_205_RESET_CONTENT)
@@ -325,6 +333,7 @@ class CookieTokenRefreshView(TokenRefreshView):
     both `access` and `refresh` — we move `refresh` into the cookie and
     keep only `access` in the response body.
     """
+
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'token_refresh'
 

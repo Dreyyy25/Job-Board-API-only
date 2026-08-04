@@ -35,6 +35,7 @@ task brief):
   exists to prevent. An operator must restore checkpointer access before
   the erasure can complete, not silently accept a partial one.
 """
+
 import logging
 
 from django.db.models.signals import pre_delete

@@ -1,0 +1,4 @@
+# One-time ruff format normalization; whitespace-only, no behavior change.
+# Use: git config blame.ignoreRevsFile .git-blame-ignore-revs
+# GitHub's blame view picks this file up automatically.
+ba01d1aca859c9d2ec042f4fa6b426b1955f67e4

@@ -5,6 +5,7 @@ Stock LangChain fakes raise NotImplementedError on with_structured_output
 outside tests.py so later phases (resume import, screening) reuse it.
 Never imported by production code.
 """
+
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
@@ -21,6 +22,7 @@ class FakeStructuredChatModel(GenericFakeChatModel):
     retry behaviour. An entry that is an Exception is raised instead
     (simulates provider errors); an entry of None simulates a parse failure.
     """
+
     parsed_outputs: list[Any] = []
     usage: dict = {"input_tokens": 100, "output_tokens": 50, "total_tokens": 150}
     model: str = "fake-model"
@@ -29,8 +31,7 @@ class FakeStructuredChatModel(GenericFakeChatModel):
         kwargs.setdefault("messages", iter([]))
         super().__init__(parsed_outputs=list(parsed_outputs or []), **kwargs)
 
-    def with_structured_output(self, schema, method="json_schema", *,
-                               include_raw=False, **kwargs):
+    def with_structured_output(self, schema, method="json_schema", *, include_raw=False, **kwargs):
         def _call(_input):
             item = self.parsed_outputs.pop(0)
             if isinstance(item, Exception):
@@ -40,6 +41,7 @@ class FakeStructuredChatModel(GenericFakeChatModel):
                 error = None if item is not None else ValueError("parse failed")
                 return {"raw": raw, "parsed": item, "parsing_error": error}
             return item
+
         return RunnableLambda(_call)
 
 
@@ -54,6 +56,7 @@ class ScriptedFakeChatModel(BaseChatModel):
     Exception is raised instead — script provider failures that way. Entries
     carrying tool_calls drive the agent round the loop.
     """
+
     responses: list[Any] = []
     model: str = "fake-pro"
 
@@ -65,7 +68,8 @@ class ScriptedFakeChatModel(BaseChatModel):
         if not self.responses:
             raise AssertionError(
                 "ScriptedFakeChatModel ran out of scripted responses — the agent "
-                "made more model calls than the test expected.")
+                "made more model calls than the test expected."
+            )
         item = self.responses.pop(0)
         if isinstance(item, Exception):
             raise item
