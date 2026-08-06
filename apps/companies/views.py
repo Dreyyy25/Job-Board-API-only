@@ -9,7 +9,9 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.filters import SearchFilter
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
 from apps.accounts.authentication import CustomJWTAuthentication
+from jobApp.throttling import BurstRateThrottle
 from . import services
 from .filters import PublicCompanyFilter
 from .models import BusinessStream, Company, CompanyImages
@@ -128,6 +130,10 @@ class PublicCompanyViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Company.objects.all()
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [AllowAny]
+    # Layered: anon ceiling + per-user daily + per-user burst -- setting
+    # this attribute REPLACES DRF's defaults, so all three must be listed
+    # to keep the 60/min burst throttle backstopping anonymous browse here.
+    throttle_classes = [AnonRateThrottle, UserRateThrottle, BurstRateThrottle]
     filter_backends = [DjangoFilterBackend, SearchFilter]
     filterset_class = PublicCompanyFilter
     search_fields = ['company_name', 'profile_description']

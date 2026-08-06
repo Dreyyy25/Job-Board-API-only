@@ -369,6 +369,22 @@ class PublicCompanyReadOnlyTests(APITestCase):
         self.assertTrue(Company.objects.filter(id=self.company.id).exists())
 
 
+class PublicCompanyThrottleAttachmentTests(APITestCase):
+    """Setting throttle_classes replaces DRF's defaults, so the burst class
+    must be listed explicitly alongside anon/user to backstop anonymous
+    browse traffic on this endpoint (see jobApp/throttling.py)."""
+
+    def test_public_company_viewset_has_layered_throttles(self):
+        from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
+        from jobApp.throttling import BurstRateThrottle
+        from apps.companies.views import PublicCompanyViewSet
+
+        self.assertEqual(
+            PublicCompanyViewSet.throttle_classes,
+            [AnonRateThrottle, UserRateThrottle, BurstRateThrottle],
+        )
+
+
 class PublicCompanySearchAndFilterTests(APITestCase):
     """Task 4: search over company_name/profile_description; business_stream filter."""
 

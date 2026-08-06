@@ -242,6 +242,80 @@ class JobLocationAnonymousReadTests(APITestCase):
         self.assertEqual(r.status_code, status.HTTP_200_OK)
 
 
+class JobLocationWritePermissionTests(APITestCase):
+    """JobLocation has no owner FK, so write access is company-create /
+    admin-only-edit rather than an ownership check (see permissions.py)."""
+
+    def setUp(self):
+        self.company = UserAccount.objects.create_user(
+            email="loc-company@example.com", password="Str0ng-Password!", user_type="company"
+        )
+        self.seeker = UserAccount.objects.create_user(
+            email="loc-seeker@example.com", password="Str0ng-Password!", user_type="job_seeker"
+        )
+        self.admin = UserAccount.objects.create_superuser(email="loc-admin@example.com", password="Str0ng-Password!")
+        self.location = JobLocation.objects.create(city="Baguio", country="PH")
+
+    def test_anonymous_get_list_returns_200(self):
+        r = self.client.get("/api/v1/jobs/job-locations/")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+
+    def test_anonymous_post_returns_401(self):
+        r = self.client.post("/api/v1/jobs/job-locations/", {"city": "Vigan", "country": "PH"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_seeker_post_returns_403(self):
+        _auth(self.client, self.seeker)
+        r = self.client.post("/api/v1/jobs/job-locations/", {"city": "Vigan", "country": "PH"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_company_post_returns_201(self):
+        _auth(self.client, self.company)
+        r = self.client.post("/api/v1/jobs/job-locations/", {"city": "Vigan", "country": "PH"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+
+    def test_company_put_returns_403(self):
+        _auth(self.client, self.company)
+        r = self.client.put(
+            f"/api/v1/jobs/job-locations/{self.location.id}/",
+            {"city": "Hacked", "country": "PH"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_company_patch_returns_403(self):
+        _auth(self.client, self.company)
+        r = self.client.patch(
+            f"/api/v1/jobs/job-locations/{self.location.id}/",
+            {"city": "Hacked"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_company_delete_returns_403(self):
+        _auth(self.client, self.company)
+        r = self.client.delete(f"/api/v1/jobs/job-locations/{self.location.id}/")
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertTrue(JobLocation.objects.filter(id=self.location.id).exists())
+
+    def test_admin_patch_succeeds(self):
+        _auth(self.client, self.admin)
+        r = self.client.patch(
+            f"/api/v1/jobs/job-locations/{self.location.id}/",
+            {"city": "Baguio City"},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.location.refresh_from_db()
+        self.assertEqual(self.location.city, "Baguio City")
+
+    def test_admin_delete_succeeds(self):
+        _auth(self.client, self.admin)
+        r = self.client.delete(f"/api/v1/jobs/job-locations/{self.location.id}/")
+        self.assertEqual(r.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(JobLocation.objects.filter(id=self.location.id).exists())
+
+
 class ApplicationTests(APITestCase):
     def setUp(self):
         self.seeker = UserAccount.objects.create_user(

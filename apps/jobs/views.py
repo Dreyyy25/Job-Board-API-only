@@ -6,7 +6,7 @@ from drf_spectacular.utils import (
 from rest_framework import serializers as drf_serializers
 from rest_framework import viewsets, status
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
-from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
 from django_filters.rest_framework import DjangoFilterBackend
@@ -24,7 +24,13 @@ from .serializers import (
     JobPostActivitySerializer,
     JobPostSkillSetSerializer,
 )
-from .permissions import IsAdminOrReadOnly, IsJobPosterOrAdmin, IsApplicantOrCompanyOrAdmin, CanManageJobSkills
+from .permissions import (
+    IsAdminOrReadOnly,
+    IsJobPosterOrAdmin,
+    IsApplicantOrCompanyOrAdmin,
+    CanManageJobLocations,
+    CanManageJobSkills,
+)
 
 
 _ApplyRequestSerializer = inline_serializer(
@@ -73,14 +79,16 @@ class JobLocationViewSet(viewsets.ModelViewSet):
     """
     API for job locations.
     - Everyone can view locations
-    - Authenticated users (companies) can create locations
-    - Admins can manage all locations
+    - Company users (or admins) can create locations
+    - Only admins can update or delete locations -- JobLocation has no
+      owner FK, so any company could otherwise edit/delete another
+      company's location
     """
 
     queryset = JobLocation.objects.all()
     serializer_class = JobLocationSerializer
     authentication_classes = [CustomJWTAuthentication]
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [CanManageJobLocations]
 
 
 class JobPostViewSet(viewsets.ModelViewSet):
