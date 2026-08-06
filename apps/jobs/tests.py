@@ -87,10 +87,10 @@ class JobPostNestedReadTests(APITestCase):
             salary_max="120000.00",
             salary_type="yearly",
         )
-        skill = SkillSet.objects.create(skill_name="Python")
+        self.skill = SkillSet.objects.create(skill_name="Python")
         self.job_skill = JobPostSkillSet.objects.create(
             job_post=self.job,
-            skill_set=skill,
+            skill_set=self.skill,
             skill_level="Advanced",
             is_required=True,
         )
@@ -122,7 +122,7 @@ class JobPostNestedReadTests(APITestCase):
         self.assertEqual(skill_entry["id"], str(self.job_skill.id))
         self.assertEqual(
             skill_entry["skill_set"],
-            {"id": str(skill_entry["skill_set"]["id"]), "skill_name": "Python"},
+            {"id": str(self.skill.id), "skill_name": "Python"},
         )
         self.assertEqual(skill_entry["skill_level"], "Advanced")
         self.assertIs(skill_entry["is_required"], True)
@@ -146,6 +146,19 @@ class JobPostNestedReadTests(APITestCase):
 
     def test_owner_sees_hidden_description_in_nested_read(self):
         _auth(self.client, self.owner)
+        r = self.client.get(f"/api/v1/jobs/job-posts/{self.job.id}/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data.get("job_description_hidden"), "internal notes")
+
+    def test_admin_sees_hidden_description_in_nested_read(self):
+        # Covers the is_staff/is_superuser branch of _job_post_is_owner,
+        # which is not exercised by the owner/anon tests above -- an admin
+        # is neither the job's company owner nor anonymous.
+        admin = UserAccount.objects.create_superuser(
+            email="nested-admin@example.com",
+            password="Str0ng-Password!",
+        )
+        _auth(self.client, admin)
         r = self.client.get(f"/api/v1/jobs/job-posts/{self.job.id}/")
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.data.get("job_description_hidden"), "internal notes")
