@@ -7,7 +7,8 @@ from django.test import override_settings
 from django.test.utils import CaptureQueriesContext
 from apps.accounts.models import UserAccount
 from apps.companies.models import BusinessStream, Company
-from apps.jobs.models import JobType, JobLocation, JobPost
+from apps.jobs.models import JobType, JobLocation, JobPost, JobPostSkillSet
+from apps.seekers.models import SkillSet
 
 
 def _auth(client, user):
@@ -50,6 +51,110 @@ class JobPostHiddenFieldTests(APITestCase):
         r = self.client.get(f"/api/v1/jobs/job-posts/{self.job.id}/")
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.data.get("job_description_hidden"), "secret-notes")
+
+
+class JobPostNestedReadTests(APITestCase):
+    """Task 2: list/retrieve replace bare FK UUIDs with nested objects."""
+
+    def setUp(self):
+        self.owner = UserAccount.objects.create_user(
+            email="nested-owner@example.com", password="Str0ng-Password!", user_type="company"
+        )
+        self.seeker = UserAccount.objects.create_user(
+            email="nested-seeker@example.com", password="Str0ng-Password!", user_type="job_seeker"
+        )
+        stream = BusinessStream.objects.create(business_stream_name="Data & AI")
+        self.company = self.owner.company_profile
+        self.company.company_name = "Halcyon Systems"
+        self.company.business_stream = stream
+        self.company.save()
+        self.job_type = JobType.objects.create(job_type_name="Full-time")
+        self.location = JobLocation.objects.create(
+            street_address="1 Main St",
+            city="Berlin",
+            country="Germany",
+            zip="10115",
+            country_code="DE",
+        )
+        self.job = JobPost.objects.create(
+            company=self.company,
+            job_type=self.job_type,
+            job_location=self.location,
+            job_title="Backend Engineer",
+            job_description="Build things",
+            job_description_hidden="internal notes",
+            salary_min="90000.00",
+            salary_max="120000.00",
+            salary_type="yearly",
+        )
+        skill = SkillSet.objects.create(skill_name="Python")
+        self.job_skill = JobPostSkillSet.objects.create(
+            job_post=self.job,
+            skill_set=skill,
+            skill_level="Advanced",
+            is_required=True,
+        )
+
+    def _assert_nested_shape(self, data):
+        self.assertEqual(data["company"]["id"], str(self.company.id))
+        self.assertEqual(data["company"]["company_name"], "Halcyon Systems")
+        self.assertEqual(
+            data["company"]["business_stream"],
+            {"id": str(self.company.business_stream_id), "business_stream_name": "Data & AI"},
+        )
+        self.assertEqual(
+            data["job_type"],
+            {"id": str(self.job_type.id), "job_type_name": "Full-time"},
+        )
+        self.assertEqual(
+            data["job_location"],
+            {
+                "id": str(self.location.id),
+                "street_address": "1 Main St",
+                "city": "Berlin",
+                "country": "Germany",
+                "zip": "10115",
+                "country_code": "DE",
+            },
+        )
+        self.assertEqual(len(data["required_skills"]), 1)
+        skill_entry = data["required_skills"][0]
+        self.assertEqual(skill_entry["id"], str(self.job_skill.id))
+        self.assertEqual(
+            skill_entry["skill_set"],
+            {"id": str(skill_entry["skill_set"]["id"]), "skill_name": "Python"},
+        )
+        self.assertEqual(skill_entry["skill_level"], "Advanced")
+        self.assertIs(skill_entry["is_required"], True)
+
+    def test_anonymous_list_has_nested_shape(self):
+        r = self.client.get("/api/v1/jobs/job-posts/")
+        self.assertEqual(r.status_code, 200)
+        results = r.data["results"]
+        job_data = next(j for j in results if j["id"] == str(self.job.id))
+        self._assert_nested_shape(job_data)
+
+    def test_anonymous_retrieve_has_nested_shape(self):
+        r = self.client.get(f"/api/v1/jobs/job-posts/{self.job.id}/")
+        self.assertEqual(r.status_code, 200)
+        self._assert_nested_shape(r.data)
+
+    def test_anonymous_does_not_see_hidden_description_in_nested_read(self):
+        r = self.client.get(f"/api/v1/jobs/job-posts/{self.job.id}/")
+        self.assertEqual(r.status_code, 200)
+        self.assertNotIn("job_description_hidden", r.data)
+
+    def test_owner_sees_hidden_description_in_nested_read(self):
+        _auth(self.client, self.owner)
+        r = self.client.get(f"/api/v1/jobs/job-posts/{self.job.id}/")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data.get("job_description_hidden"), "internal notes")
+
+    def test_company_id_is_company_id_not_user_account_id(self):
+        r = self.client.get(f"/api/v1/jobs/job-posts/{self.job.id}/")
+        self.assertEqual(r.status_code, 200)
+        self.assertNotEqual(r.data["company"]["id"], str(self.owner.id))
+        self.assertEqual(r.data["company"]["id"], str(self.company.id))
 
 
 class JobPostPermissionTests(APITestCase):
@@ -491,10 +596,20 @@ class JobPostQueryCountTests(APITestCase):
         company.save()
         jt = JobType.objects.create(job_type_name="QC FT")
         loc = JobLocation.objects.create(city="QCity", country="PH")
+        skill = SkillSet.objects.create(skill_name="QC Skill")
         for i in range(50):
-            JobPost.objects.create(
+            job = JobPost.objects.create(
                 company=company, job_type=jt, job_location=loc, job_title=f"Job {i}", job_description="..."
             )
+            if i % 5 == 0:
+                # Exercise the required_skills prefetch on a subset of rows
+                # so the nested read representation can't sneak in an N+1.
+                JobPostSkillSet.objects.create(
+                    job_post=job,
+                    skill_set=skill,
+                    skill_level="Advanced",
+                    is_required=True,
+                )
 
     def test_job_post_list_query_count(self):
         with CaptureQueriesContext(connection) as ctx:
@@ -506,3 +621,10 @@ class JobPostQueryCountTests(APITestCase):
             QUERY_BUDGET,
             f"Query count {len(ctx)} exceeds budget {QUERY_BUDGET}",
         )
+        # The nested read shape must actually be present, not just cheap.
+        sample = r.data["results"][0]
+        self.assertIsInstance(sample["company"], dict)
+        self.assertIn("business_stream", sample["company"])
+        self.assertIsInstance(sample["job_type"], dict)
+        self.assertIsInstance(sample["job_location"], dict)
+        self.assertIn("required_skills", sample)

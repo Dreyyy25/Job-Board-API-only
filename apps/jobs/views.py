@@ -21,6 +21,7 @@ from .serializers import (
     JobTypeSerializer,
     JobLocationSerializer,
     JobPostSerializer,
+    JobPostReadSerializer,
     JobPostActivitySerializer,
     JobPostSkillSetSerializer,
 )
@@ -103,6 +104,12 @@ class JobPostViewSet(viewsets.ModelViewSet):
     search_fields = ['job_title', 'job_description', 'company__company_name']
     ordering_fields = ['created_at', 'salary_max', 'salary_min', 'deadline_date']
     ordering = ['-created_at']
+
+    def get_serializer_class(self):
+        """Nested read shape for list/retrieve; UUID-in write contract otherwise."""
+        if self.action in ('list', 'retrieve'):
+            return JobPostReadSerializer
+        return JobPostSerializer
 
     def get_queryset(self):
         """Admins → all; company → their own (published + drafts); else → published."""
