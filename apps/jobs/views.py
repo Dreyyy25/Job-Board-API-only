@@ -23,6 +23,7 @@ from .serializers import (
     JobPostReadSerializer,
     JobPostActivitySerializer,
     JobPostActivityReadSerializer,
+    JobPostActivityUpdateSerializer,
     JobPostSkillSetSerializer,
 )
 from .permissions import (
@@ -168,12 +169,13 @@ class JobPostActivityViewSet(viewsets.ModelViewSet):
     serializer_class = JobPostActivitySerializer
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [IsApplicantOrCompanyOrAdmin]
+    # Applications are created only through the validated /jobs/apply/ flow.
+    http_method_names = ['get', 'put', 'patch', 'delete', 'head', 'options']
 
     def get_serializer_class(self):
-        """Nested read shape for list/retrieve; plain write shape otherwise."""
         if self.action in ('list', 'retrieve'):
             return JobPostActivityReadSerializer
-        return JobPostActivitySerializer
+        return JobPostActivityUpdateSerializer
 
     def get_queryset(self):
         """Admins → all; seekers → own; company → applications to their jobs; else → none."""

@@ -966,3 +966,80 @@ class ApplicationNestedReadTests(APITestCase):
         self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {refresh.access_token}')
         with self.assertNumQueries(3):  # count + page + auth user lookup
             self.client.get('/api/v1/jobs/job-applications/?page_size=50')
+
+
+class ApplicationLockdownTests(APITestCase):
+    def setUp(self):
+        self.seeker = UserAccount.objects.create_user(
+            email='lock-seeker@example.com', password='Str0ng-Password!', user_type='job_seeker')
+        self.other_seeker = UserAccount.objects.create_user(
+            email='lock-other@example.com', password='Str0ng-Password!', user_type='job_seeker')
+        self.company_user = UserAccount.objects.create_user(
+            email='lock-co@example.com', password='Str0ng-Password!', user_type='company')
+        company = Company.objects.get(user_account=self.company_user)
+        jt = JobType.objects.create(job_type_name='Full-time')
+        loc = JobLocation.objects.create(city='X', country='Y')
+        self.job = JobPost.objects.create(
+            company=company, job_type=jt, job_location=loc,
+            job_title='T', job_description='d')
+        self.app = JobPostActivity.objects.create(user_account=self.seeker, job_post=self.job)
+
+    def _as(self, user):
+        refresh = RefreshToken.for_user(user)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {refresh.access_token}')
+
+    def _patch(self, status_value):
+        return self.client.patch(
+            f'/api/v1/jobs/job-applications/{self.app.id}/',
+            {'application_status': status_value}, format='json')
+
+    def test_viewset_post_is_gone(self):
+        self._as(self.other_seeker)
+        r = self.client.post('/api/v1/jobs/job-applications/', {
+            'user_account': str(self.seeker.id), 'job_post': str(self.job.id),
+            'application_status': 'accepted'}, format='json')
+        self.assertEqual(r.status_code, 405)
+
+    def test_update_cannot_move_the_application(self):
+        self._as(self.seeker)
+        r = self.client.patch(
+            f'/api/v1/jobs/job-applications/{self.app.id}/',
+            {'user_account': str(self.other_seeker.id), 'cover_letter': 'new',
+             'application_status': 'withdrawn'}, format='json')
+        self.assertEqual(r.status_code, 200)
+        self.app.refresh_from_db()
+        self.assertEqual(self.app.user_account_id, self.seeker.id)  # read-only ignored
+        self.assertEqual(self.app.cover_letter, '')
+        self.assertEqual(self.app.application_status, 'withdrawn')
+
+    def test_seeker_transitions(self):
+        self._as(self.seeker)
+        self.assertEqual(self._patch('accepted').status_code, 400)   # self-accept blocked
+        self.assertEqual(self._patch('withdrawn').status_code, 200)  # pending -> withdrawn OK
+        self.assertEqual(self._patch('pending').status_code, 400)    # un-withdraw blocked
+
+    def test_seeker_can_withdraw_from_reviewed(self):
+        self.app.application_status = 'reviewed'
+        self.app.save()
+        self._as(self.seeker)
+        self.assertEqual(self._patch('withdrawn').status_code, 200)
+
+    def test_company_transitions(self):
+        self._as(self.company_user)
+        self.assertEqual(self._patch('withdrawn').status_code, 400)  # company can't withdraw
+        self.assertEqual(self._patch('reviewed').status_code, 200)   # pending -> reviewed
+        self.assertEqual(self._patch('pending').status_code, 400)    # no going back
+        self.assertEqual(self._patch('accepted').status_code, 200)   # reviewed -> accepted
+
+    def test_same_value_is_a_noop_200(self):
+        self._as(self.seeker)
+        self.assertEqual(self._patch('pending').status_code, 200)
+
+    def test_admin_unrestricted(self):
+        admin = UserAccount.objects.create_user(
+            email='lock-admin@example.com', password='Str0ng-Password!', user_type='job_seeker')
+        admin.is_staff = True
+        admin.save()
+        self._as(admin)
+        self.assertEqual(self._patch('accepted').status_code, 200)
+        self.assertEqual(self._patch('pending').status_code, 200)
