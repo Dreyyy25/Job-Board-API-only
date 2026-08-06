@@ -7,8 +7,8 @@ http://localhost:8000/api/v1/
 
 ## Overview
 
-This API provides 87 endpoints organized into 4 main modules:
-- **Accounts** (14 endpoints) - Authentication, token management, and user accounts
+This API provides 86 endpoints organized into 4 main modules:
+- **Accounts** (13 endpoints) - Authentication, token management, and user accounts
 - **Companies** (19 endpoints) - Business streams, company profiles, images, and the public company directory
 - **Jobs** (27 endpoints) - Job types, locations, posts, applications, and skills
 - **Seekers** (27 endpoints) - Seeker profiles, education, experience, and skills
@@ -454,14 +454,16 @@ Content-Type: application/json
 ### 25. List Company Images
 ```http
 GET /api/v1/companies/company-images/
-Authorization: Bearer <access-token>
 ```
+
+**Note:** No authentication required.
 
 ### 26. Get Company Image
 ```http
 GET /api/v1/companies/company-images/{id}/
-Authorization: Bearer <access-token>
 ```
+
+**Note:** No authentication required.
 
 ### 27. Update Company Image
 ```http
