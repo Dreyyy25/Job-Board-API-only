@@ -98,7 +98,7 @@ class IsApplicant(BasePermission):
 
 class IsAdminOrReadOnly(BasePermission):
     """
-    Permission for reference data (JobType, JobLocation):
+    Permission for reference data (JobType):
     - Everyone can read
     - Only admins can create/update/delete
     """
