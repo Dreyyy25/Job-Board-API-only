@@ -166,13 +166,32 @@ class SeekerSkillNestedReadTests(APITestCase):
         refresh = RefreshToken.for_user(self.seeker)
         self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {refresh.access_token}')
 
+    def _assert_whole_row(self, row):
+        """created_at is a serialized timestamp we don't pin exactly -- pop it,
+        assert it's present, then whole-dict-equal the rest so every other
+        key (including ones a regression might silently drop) is pinned."""
+        created_at = row['skill_set'].pop('created_at')
+        self.assertIsNotNone(created_at)
+        self.assertEqual(row, {
+            'id': str(self.row.id),
+            # FK fields render as the raw related-object pk (a UUID instance) at
+            # the pre-JSON-render `response.data` stage DRF's test client exposes
+            # -- only direct model UUIDField values (like `id` above) go through
+            # UUIDField.to_representation() and come out as str.
+            'user_account': self.seeker.id,
+            'skill_set': {
+                'id': str(self.skill.id),
+                'skill_name': 'Python',
+            },
+            'skill_level': 'Advanced',
+        })
+
     def test_list_nests_skill_name(self):
         r = self.client.get('/api/v1/seekers/seeker-skills/')
         row = r.data['results'][0]
-        self.assertEqual(row['skill_set']['skill_name'], 'Python')
-        self.assertEqual(row['skill_level'], 'Advanced')
+        self._assert_whole_row(row)
 
     def test_dashboard_skills_nest_skill_name(self):
         r = self.client.get(f'/api/v1/seekers/dashboard/{self.seeker.id}/')
         self.assertEqual(r.status_code, 200)
-        self.assertEqual(r.data['skills'][0]['skill_set']['skill_name'], 'Python')
+        self._assert_whole_row(r.data['skills'][0])

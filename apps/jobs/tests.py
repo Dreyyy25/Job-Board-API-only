@@ -914,14 +914,7 @@ class ApplicationNestedReadTests(APITestCase):
             company=company, job_type=jt, job_location=loc, job_title='ML Engineer',
             job_description='d', salary_min=90000, salary_max=120000, salary_type='yearly')
         self.app = JobPostActivity.objects.create(user_account=self.seeker, job_post=self.job)
-        refresh = RefreshToken.for_user(self.seeker)
-        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {refresh.access_token}')
-
-    def test_list_returns_nested_job_post_summary(self):
-        r = self.client.get('/api/v1/jobs/job-applications/')
-        self.assertEqual(r.status_code, 200)
-        row = r.data['results'][0]
-        self.assertEqual(row['job_post'], {
+        self.expected_job_post = {
             'id': str(self.job.id),
             'job_title': 'ML Engineer',
             'company': {'id': str(self.job.company_id), 'company_name': 'Nested Co'},
@@ -929,7 +922,15 @@ class ApplicationNestedReadTests(APITestCase):
             'job_location': {'city': 'Berlin', 'country': 'Germany'},
             'salary_min': '90000.00', 'salary_max': '120000.00', 'salary_type': 'yearly',
             'deadline_date': None, 'is_published': True, 'is_active': True,
-        })
+        }
+        refresh = RefreshToken.for_user(self.seeker)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {refresh.access_token}')
+
+    def test_list_returns_nested_job_post_summary(self):
+        r = self.client.get('/api/v1/jobs/job-applications/')
+        self.assertEqual(r.status_code, 200)
+        row = r.data['results'][0]
+        self.assertEqual(row['job_post'], self.expected_job_post)
 
     def test_unpublished_job_still_nested_for_the_applicant(self):
         self.job.is_published = False
@@ -943,6 +944,14 @@ class ApplicationNestedReadTests(APITestCase):
         r = self.client.get(f'/api/v1/jobs/applications/user/{self.seeker.id}/')
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.data[0]['job_post']['company']['company_name'], 'Nested Co')
+
+    def test_company_view_returns_nested_job_post_summary(self):
+        refresh = RefreshToken.for_user(self.company_user)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {refresh.access_token}')
+        r = self.client.get(f'/api/v1/jobs/applications/job/{self.job.id}/')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data[0]['job_post']['company']['company_name'], 'Nested Co')
+        self.assertEqual(r.data[0]['job_post'], self.expected_job_post)
 
     def test_list_query_count_is_flat(self):
         for i in range(10):
