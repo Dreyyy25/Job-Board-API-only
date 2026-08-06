@@ -98,7 +98,7 @@ class IsApplicant(BasePermission):
 
 class IsAdminOrReadOnly(BasePermission):
     """
-    Permission for reference data (JobType, JobLocation):
+    Permission for reference data (JobType):
     - Everyone can read
     - Only admins can create/update/delete
     """
@@ -114,6 +114,44 @@ class IsAdminOrReadOnly(BasePermission):
 
         # Write permissions only for admins
         return request.user and (request.user.is_staff or request.user.is_superuser)
+
+
+class CanManageJobLocations(BasePermission):
+    """
+    Permission for job locations:
+    - Everyone (including anonymous) can view locations
+    - Company users or admins can create locations
+    - Only admins can update/delete locations -- JobLocation has no owner
+      FK, so ownership can't be checked object-by-object, and it's
+      `on_delete=CASCADE` into JobPost (and from there into
+      JobPostActivity), so admin-only is the only safe write rule for
+      PUT/PATCH/DELETE without a model change.
+    """
+
+    def has_permission(self, request, view):
+        """
+        Read permissions for everyone.
+        Create permissions for authenticated company users or admins.
+        Update/delete permissions for admins only.
+        """
+        # Read permissions for everyone
+        if request.method in SAFE_METHODS:
+            return True
+
+        # All other methods require authentication
+        if not (request.user and request.user.is_authenticated):
+            return False
+
+        # Admins can do anything
+        if request.user.is_staff or request.user.is_superuser:
+            return True
+
+        # Non-admins may only create, and only as a company user
+        if request.method == 'POST':
+            return request.user.user_type == 'company'
+
+        # PUT/PATCH/DELETE: admins only (handled above)
+        return False
 
 
 class CanManageJobSkills(BasePermission):

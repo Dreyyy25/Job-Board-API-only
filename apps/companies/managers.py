@@ -18,10 +18,12 @@ class CompanyQuerySet(models.QuerySet):
     def with_open_roles_count(self):
         """Annotate each company with its published+active job-post count.
 
-        A filtered, distinct Count -- `distinct=True` keeps this correct
-        even when composed with a join-based prefetch (e.g. `with_related()`'s
-        `images`) that would otherwise multiply the joined rows behind the
-        aggregate.
+        A filtered, distinct Count -- `distinct=True` is defensive: it
+        guards against a second multi-valued JOIN (e.g. another `annotate`
+        or `filter` across a reverse FK/M2M) being composed into the same
+        queryset later and inflating this aggregate. `prefetch_related`
+        (used by `with_related()`'s `images`) runs as a separate query and
+        can't cause that on its own.
         """
         return self.annotate(
             open_roles_count=Count(
