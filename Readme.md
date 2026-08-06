@@ -1,160 +1,161 @@
 # Job Board API
 
-A comprehensive REST API for a job board platform where companies can post jobs and job seekers can search and apply for positions.
+[![CI](https://github.com/Dreyyy25/Job-Board-API-only/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Dreyyy25/Job-Board-API-only/actions/workflows/ci.yml)
+
+A production-deployed REST API for a job board platform: companies post jobs, seekers search and apply, and a Gemini-powered AI suite assists both sides — drafting job posts, importing resumes, screening applicants, and answering seekers through a guarded chat assistant.
+
+**Live instance** (free tier — the first request after idle can take up to a minute while the instance wakes and re-runs migrations):
+
+- Swagger UI: https://jobboard-api-mcoa.onrender.com/api/docs/
+- ReDoc: https://jobboard-api-mcoa.onrender.com/api/redoc/
+- Health: https://jobboard-api-mcoa.onrender.com/healthz
 
 ## Features
 
-- **User Management** - Authentication and authorization for job seekers and companies
-- **Company Profiles** - Business information, industry categorization, and company images
-- **Job Seeker Profiles** - Personal information, education, work experience, and skills
-- **Job Postings** - Create, search, and filter job opportunities
-- **Application System** - Apply for jobs and track application status
+### Core platform
 
-## Tech Stack
+- **Accounts & auth** — custom UUID-keyed user model (`job_seeker` / `company` roles), JWT access tokens, refresh token in an httpOnly cookie (never in a response body), Argon2 password hashing, layered rate throttling.
+- **Companies** — profiles with business-stream categorization and image galleries, plus a public company directory.
+- **Seekers** — profiles with education, work experience, and skill sets; per-user dashboards.
+- **Jobs** — postings with search/filter/ordering, publication control, skill requirements, applications with status tracking, and public browse without an account.
+- **86 documented REST endpoints** across those four modules — see [API_DOCUMENTATION.md](API_DOCUMENTATION.md) and the importable [Postman collection](Job%20Board%20API.postman_collection.json).
 
-- **Framework**: Django 5.2.5 + Django REST Framework 3.16.1
-- **Database**: PostgreSQL
-- **Authentication**: JWT (Simple JWT 5.5.1)
+### AI suite (Google Gemini via LangChain)
 
-## Project Structure
+- **Job-post writer** — companies get a structured draft from a rough description; nothing is saved until they submit it themselves.
+- **Resume import** — seekers upload a PDF (or paste text) and receive a structured profile draft.
+- **Applicant screening** — companies get a scored, ranked report of a post's applicants, cached until a newer application invalidates it.
+- **Chat assistant** — a tool-using agent for seekers (job search, job details, profile lookup, fit comparison) with per-user tool closures, read-only data access, sanitized replies, strict per-turn/per-thread model-call budgets, and conversation history checkpointed in Postgres.
+- Every billable model call is metered in an audit table; AI endpoints carry their own throttle scopes on top of the global ones.
 
-```
-jobApp/
-├── apps/
-│   ├── accounts/     # User authentication and management
-│   ├── companies/    # Company profiles and business streams
-│   ├── seekers/      # Job seeker profiles, education, experience, skills
-│   └── jobs/         # Job postings, applications, and requirements
-├── jobApp/           # Django project settings
-├── config.py         # Centralized env-var access (imported by settings)
-└── pyproject.toml    # Dependencies (managed by uv)
-```
+## Tech stack
 
-## Quick Start
+| Layer | Choice |
+| --- | --- |
+| Framework | Django 5.2 · Django REST Framework |
+| Database | PostgreSQL (14+; CI and the Docker harness run 18) |
+| Auth | SimpleJWT — bearer access token + httpOnly refresh cookie |
+| AI | LangChain / LangGraph agents on Google Gemini |
+| API schema | drf-spectacular (OpenAPI 3, Swagger UI, ReDoc) |
+| Server | gunicorn + whitenoise (Docker), Django dev server locally |
+| Tooling | uv (dependencies), ruff (lint + format), GitHub Actions (CI) |
+
+## Quick start
 
 ### Prerequisites
 
-- Python 3.13.5+
-- PostgreSQL 17+
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) — provisions the pinned Python 3.13 automatically
+- PostgreSQL 14+ running locally
 
-### Installation
+### Setup
 
-1. **Clone the repository**
-   ```bash
-   git clone <repository-url>
-   cd jobApp
-   ```
-
-2. **Install dependencies with [uv](https://docs.astral.sh/uv/)**
-
-   If you don't have uv installed yet, see the [install guide](https://docs.astral.sh/uv/getting-started/installation/).
-
-   ```bash
-   uv sync
-   ```
-
-   This reads `pyproject.toml` + `uv.lock`, provisions Python 3.13 (pinned in `.python-version`), creates `.venv/`, and installs all dependencies.
-
-   Activate the venv or prefix commands with `uv run`:
-
-   ```bash
-   # Windows (PowerShell)
-   .venv\Scripts\activate
-
-   # macOS/Linux
-   source .venv/bin/activate
-   ```
-
-3. **Set up environment variables**
-
-   Create a `.env` file in the project root. All values in this file are read by `config.py` and injected into Django settings:
-
-   ```bash
-   # Database
-   DB_NAME=your_db_name
-   DB_USER=your_username
-   DB_PASSWORD=your_password
-   DB_HOST=your_db_host #by default: localhost
-   DB_PORT=your_db_port #by default: 5432
-
-   # Django
-   SECRET_KEY=your-secret-key-here
-
-   # Deployment
-   DEBUG=true
-   ALLOWED_HOSTS=localhost,127.0.0.1
-   ADMIN_URL=admin/
-   ```
-
-   **Picking a settings module**
-
-   The settings package exposes three environment modules:
-
-   | Module | When used |
-   | --- | --- |
-   | `jobApp.settings.development` | Default for `manage.py` (except `test`). DEBUG=True, loose CORS, no HTTPS redirect. |
-   | `jobApp.settings.production` | Default for `wsgi.py` / `asgi.py`. DEBUG=False, strict security, fail-fast assertions. |
-   | `jobApp.settings.test` | Auto-picked when running `manage.py test`. Fast MD5 hasher, ALLOWED_HOSTS locked to `testserver`. |
-
-   Override with `DJANGO_SETTINGS_MODULE`:
-
-   ```bash
-   DJANGO_SETTINGS_MODULE=jobApp.settings.production uv run python manage.py migrate
-   ```
-
-4. **Run migrations**
-   ```bash
-   uv run python manage.py makemigrations
-   uv run python manage.py migrate
-   ```
-
-5. **Create superuser**
-   ```bash
-   uv run python manage.py createsuperuser
-   ```
-
-6. **Start development server**
-   ```bash
-   uv run python manage.py runserver
-   ```
-
-The API will be available at: `http://localhost:8000/api/v1/`
-
-## API Documentation
-
-📖 **Complete API documentation available in [API_DOCUMENTATION.md](API_DOCUMENTATION.md)**
-
-### Postman Collections
-
-Import the provided Postman collections for easy API testing:
-- `Job Board API.postman_collection.json`
-
-## API Conventions
-
-### Pagination
-
-All list endpoints return:
-
-```json
-{
-  "count": 123,
-  "next": "http://host/api/v1/jobs/job-posts/?page=2",
-  "previous": null,
-  "results": [/* items */]
-}
+```bash
+git clone https://github.com/Dreyyy25/Job-Board-API-only.git
+cd Job-Board-API-only
+uv sync
 ```
 
-Override the page size with `?page_size=N` (max 100).
+Create a `.env` file in the project root — [`.env.example`](.env.example) documents every key. A typical local `.env`:
 
-### Search, filter, ordering (jobs)
+```bash
+DB_NAME=job_board
+DB_USER=your_username
+DB_PASSWORD=your_password
+DB_HOST=localhost   # optional — this is the default
+DB_PORT=5432        # optional — this is the default
 
-- `?search=<term>` — matches job title, description, and company name
-- `?ordering=-created_at` — sort; valid fields: `created_at`, `salary_max`, `salary_min`, `deadline_date`
-- Filters: `job_type`, `company`, `salary_type`, `is_published`, `city`, `country`, `salary_min_gte`, `salary_max_lte`, `deadline_before`, `required_skill`
+SECRET_KEY=any-long-random-string-for-local-dev
 
-## Security
+# Required at startup. Any non-empty value boots the app; a real key
+# (https://aistudio.google.com/apikey) is only needed to use AI endpoints.
+GEMINI_API_KEY=your_gemini_api_key
+```
 
-- JWT-based authentication
-- Custom permission classes for resource access control
-- Password validation and hashing
-- CORS configuration
+Create the database, then migrate and run:
+
+```bash
+createdb job_board    # or: psql -c "CREATE DATABASE job_board;"
+uv run python manage.py migrate
+uv run python manage.py ai_checkpointer_setup   # chat-history tables (idempotent)
+uv run python manage.py createsuperuser
+uv run python manage.py runserver
+```
+
+The API serves at `http://localhost:8000/api/v1/`, with interactive docs at `http://localhost:8000/api/docs/`.
+
+### Settings modules
+
+| Module | When used |
+| --- | --- |
+| `jobApp.settings.development` | Default for `manage.py` (except `test`). DEBUG on, loose CORS, no HTTPS redirect. |
+| `jobApp.settings.production` | Default for `wsgi.py` / `asgi.py` and the Docker image. Strict security, fail-fast assertions. |
+| `jobApp.settings.test` | Auto-picked by `manage.py test`. Fast password hasher, offline AI guards. |
+
+### Tests
+
+```bash
+uv run python manage.py test
+```
+
+449 tests, all offline — AI features are tested against fakes; no network access or real API key needed (the placeholder `GEMINI_API_KEY` from setup must still be present). Your Postgres role needs the `CREATEDB` privilege — the runner creates and drops `test_job_board`. If a run prints `OK` but exits nonzero with a "database is being accessed by other users" error, that's Postgres teardown noise, not a failure — rerun, or use `--keepdb`.
+
+## Docker
+
+The repo ships a production image (multi-stage uv build, non-root user, whitenoise-served static files, gunicorn). Run it locally against Postgres 18:
+
+```bash
+cp .env.docker.example .env.docker   # local-only values, git-ignored
+docker compose up --build
+```
+
+The entrypoint applies migrations and creates the chat-checkpointer tables on every boot (both idempotent), then serves on `http://localhost:8000`.
+
+## Deployment
+
+[DEPLOYMENT.md](DEPLOYMENT.md) is the runbook: build and push the image to a registry, run it on Render (or any container host) with the documented environment variables, point the platform's health check at `/healthz`, and bring your own Postgres — the live instance runs on Render's free tier with a Neon Postgres.
+
+## API conventions
+
+**Pagination** — list endpoints return `count` / `next` / `previous` / `results`; override page size with `?page_size=N` (max 100).
+
+**Jobs search & filtering**
+
+- `?search=<term>` — matches job title, description, company name, and required skill names
+- `?ordering=-created_at` — sort by `created_at`, `salary_max`, `salary_min`, `deadline_date`, or `salary_rank`
+- Filters: `job_type`, `company`, `salary_type`, `is_published`, `city`, `country`, `salary_min_gte`, `salary_max_lte`, `salary_floor`, `deadline_before`, `required_skill`, `business_stream`
+
+**Auth flow** — `register`/`login` return the access token in the body and set the refresh token as an httpOnly cookie scoped to `/api/v1/accounts/`; `token/refresh/` reads only that cookie and rotates it.
+
+## Security posture
+
+- Argon2 password hashing (with transparent upgrade from legacy hashes on login)
+- Layered throttling: anonymous/user ceilings + burst limits + scoped per-endpoint rates (register, login, token refresh, AI, chat)
+- JSON-only auth endpoints (login-CSRF mitigation for the cookie-based refresh flow)
+- Chat replies pass a multi-stage sanitizer (tag stripping, URL removal, HTML-escaping) before reaching clients; agent tools are closed over the requesting user and read-only
+- Failed logins are security-logged with hashed identifiers — no plaintext emails in logs
+- CI gate on every PR and push to protected branches: ruff lint + format, missing-migration check, OpenAPI schema validation, production deploy check, and the full test suite against Postgres 18
+
+## Project structure
+
+```
+├── apps/
+│   ├── accounts/     # Custom user model, JWT auth, refresh-cookie flow
+│   ├── companies/    # Company profiles, business streams, images, public directory
+│   ├── seekers/      # Seeker profiles, education, experience, skills
+│   ├── jobs/         # Job posts, applications, skill requirements
+│   └── ai/           # Gemini features: writer, resume import, screening, chat
+├── jobApp/           # Settings (development/production/test), URLs, healthz
+├── docker/           # Container entrypoint
+├── config.py         # Centralized env-var access (settings import from here)
+├── Dockerfile        # Production image (multi-stage uv build)
+└── docker-compose.yml# Local parity harness (exact prod image + Postgres 18)
+```
+
+## Development workflow
+
+`staging` and `main` are protected: changes land via pull request with a green CI check. Run the linters locally before pushing:
+
+```bash
+uv run ruff check .
+uv run ruff format .
+```
