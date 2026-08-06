@@ -78,7 +78,12 @@ def get_checkpointer():
 
 
 def reset_checkpointer():
-    """Drop the singleton. Tests only — production never tears the pool down."""
+    """Drop the singleton and close its pool.
+
+    For tests and short-lived management commands (ai_checkpointer_setup).
+    The long-lived web process never calls this — its pool stays open for
+    the process lifetime by design.
+    """
     global _checkpointer, _pool
     if _pool is not None:
         try:
