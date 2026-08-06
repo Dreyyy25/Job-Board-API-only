@@ -2100,6 +2100,43 @@
 										"description": "Get specific job details by ID"
 									},
 									"response": []
+								},
+								{
+									"name": "Job Posts — Filtered Browse",
+									"request": {
+										"method": "GET",
+										"header": [],
+										"url": {
+											"raw": "{{base_url}}/jobs/job-posts/?business_stream={{business_stream_id}}&salary_floor=90000&ordering=-salary_rank",
+											"host": [
+												"{{base_url}}"
+											],
+											"path": [
+												"jobs",
+												"job-posts",
+												""
+											],
+											"query": [
+												{
+													"key": "business_stream",
+													"value": "{{business_stream_id}}",
+													"description": "Filter by the posting company's business stream UUID"
+												},
+												{
+													"key": "salary_floor",
+													"value": "90000",
+													"description": "Matches when COALESCE(salary_max, salary_min) >= value; jobs with both salary_min and salary_max null never match"
+												},
+												{
+													"key": "ordering",
+													"value": "-salary_rank",
+													"description": "Coalesced salary descending (highest-paying first); salary-less jobs sort last instead of first"
+												}
+											]
+										},
+										"description": "Combined filter/ordering example: business stream + minimum coalesced salary, highest-paying first. Public access."
+									},
+									"response": []
 								}
 							]
 						},
@@ -3845,6 +3882,52 @@
 						}
 					],
 					"description": "Company image gallery management"
+				},
+				{
+					"name": "Public Company Directory",
+					"item": [
+						{
+							"name": "List Public Companies",
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/companies/public/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"companies",
+										"public",
+										""
+									]
+								},
+								"description": "Public, read-only company directory (active companies only) - No auth required. Excludes contact_email and user_account. Supports ?search= (company_name + profile_description) and ?business_stream=<uuid>."
+							},
+							"response": []
+						},
+						{
+							"name": "Get Public Company",
+							"request": {
+								"method": "GET",
+								"header": [],
+								"url": {
+									"raw": "{{base_url}}/companies/public/{{company_id}}/",
+									"host": [
+										"{{base_url}}"
+									],
+									"path": [
+										"companies",
+										"public",
+										"{{company_id}}",
+										""
+									]
+								},
+								"description": "Public company detail (active companies only) - No auth required. Same fields as the list shape, plus images."
+							},
+							"response": []
+						}
+					]
 				}
 			]
 		}

@@ -7,9 +7,9 @@ http://localhost:8000/api/v1/
 
 ## Overview
 
-This API provides 82 endpoints organized into 4 main modules:
-- **Accounts** (14 endpoints) - Authentication, token management, and user accounts
-- **Companies** (17 endpoints) - Business streams, company profiles, and images
+This API provides 86 endpoints organized into 4 main modules:
+- **Accounts** (13 endpoints) - Authentication, token management, and user accounts
+- **Companies** (19 endpoints) - Business streams, company profiles, images, and the public company directory
 - **Jobs** (27 endpoints) - Job types, locations, posts, applications, and skills
 - **Seekers** (27 endpoints) - Seeker profiles, education, experience, and skills
 
@@ -24,6 +24,21 @@ Authorization: Bearer <access_token>
 - **Access Token**: 60 minutes
 - **Refresh Token**: 7 days
 - Tokens are blacklisted on logout
+
+### Rate Limiting
+
+Throttling is layered: an anonymous/user ceiling applies everywhere, a burst ceiling and scoped per-endpoint limits are layered on top.
+
+| Throttle | Rate | Applies to |
+|----------|------|------------|
+| Anonymous | 300/hour | Every unauthenticated request |
+| Authenticated user | 1000/day | Every authenticated request |
+| Burst | 60/min | Write-heavy and public-browse endpoints (job posts, apply, public company directory) |
+| `register` (scoped) | 5/min | `POST /accounts/register/` |
+| `login` (scoped) | 10/min | `POST /accounts/login/` |
+| `token_refresh` (scoped) | 20/min | `POST /accounts/token/refresh/` |
+
+Exceeding a rate returns `429 Too Many Requests`.
 
 ---
 
@@ -61,11 +76,13 @@ Authorization: Bearer <access_token>
 | PATCH | `/companies/profile/{id}/` | Partial update company | Yes (Owner/Admin) |
 | DELETE | `/companies/profile/{id}/` | Delete company | Yes (Owner/Admin) |
 | GET | `/companies/dashboard/{user_id}/` | Company dashboard | Yes (Owner/Admin) |
-| GET | `/companies/company-images/` | List company images | Yes |
+| GET | `/companies/company-images/` | List company images | No |
 | POST | `/companies/company-images/` | Upload company image | Yes (Owner/Admin) |
-| GET | `/companies/company-images/{id}/` | Get image | Yes |
+| GET | `/companies/company-images/{id}/` | Get image | No |
 | PUT | `/companies/company-images/{id}/` | Update image | Yes (Owner/Admin) |
 | DELETE | `/companies/company-images/{id}/` | Delete image | Yes (Owner/Admin) |
+| GET | `/companies/public/` | Public company directory (active companies) | No |
+| GET | `/companies/public/{id}/` | Public company detail (active companies, includes images) | No |
 
 ### Jobs
 | Method | Endpoint | Description | Auth Required |
@@ -76,10 +93,10 @@ Authorization: Bearer <access_token>
 | PUT | `/jobs/job-types/{id}/` | Update job type | Yes (Admin) |
 | DELETE | `/jobs/job-types/{id}/` | Delete job type | Yes (Admin) |
 | GET | `/jobs/job-locations/` | List job locations | No |
-| POST | `/jobs/job-locations/` | Create job location | Yes |
+| POST | `/jobs/job-locations/` | Create job location | Yes (Company/Admin) |
 | GET | `/jobs/job-locations/{id}/` | Get job location | No |
-| PUT | `/jobs/job-locations/{id}/` | Update job location | Yes |
-| DELETE | `/jobs/job-locations/{id}/` | Delete job location | Yes |
+| PUT | `/jobs/job-locations/{id}/` | Update job location | Yes (Admin) |
+| DELETE | `/jobs/job-locations/{id}/` | Delete job location | Yes (Admin) |
 | GET | `/jobs/job-posts/` | List/search jobs | No |
 | POST | `/jobs/job-posts/` | Create job post | Yes (Company) |
 | GET | `/jobs/job-posts/{id}/` | Get job details | No |
@@ -437,14 +454,16 @@ Content-Type: application/json
 ### 25. List Company Images
 ```http
 GET /api/v1/companies/company-images/
-Authorization: Bearer <access-token>
 ```
+
+**Note:** No authentication required.
 
 ### 26. Get Company Image
 ```http
 GET /api/v1/companies/company-images/{id}/
-Authorization: Bearer <access-token>
 ```
+
+**Note:** No authentication required.
 
 ### 27. Update Company Image
 ```http
@@ -464,11 +483,77 @@ DELETE /api/v1/companies/company-images/{id}/
 Authorization: Bearer <access-token>
 ```
 
+### 29. List Public Companies
+```http
+GET /api/v1/companies/public/
+```
+
+Public, read-only company directory — no authentication required. Returns only `active` companies. Deliberately a separate route from `/companies/profile/` (which narrows a logged-in company user's queryset to their own row): this route always lists every active company, logged in or not.
+
+**Query Parameters:**
+- `search` - Matches `company_name` and `profile_description`
+- `business_stream` - Filter by business stream UUID
+
+**Response:**
+```json
+{
+  "count": 1,
+  "next": null,
+  "previous": null,
+  "results": [
+    {
+      "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+      "company_name": "Tech Solutions Inc",
+      "business_stream": {
+        "id": "0cadc1f2-e068-42c6-89f5-e4a13fd3a595",
+        "business_stream_name": "Information Technology"
+      },
+      "profile_description": "Leading software development company specializing in AI and cloud solutions",
+      "company_website_url": "https://techsolutions.com",
+      "status": "active",
+      "open_roles_count": 3
+    }
+  ]
+}
+```
+
+**Note:** Never returns `contact_email` or `user_account`. `open_roles_count` is the count of the company's published + active job posts.
+
+### 30. Get Public Company
+```http
+GET /api/v1/companies/public/{id}/
+```
+
+Same fields as the list response, plus `images`.
+
+**Response:**
+```json
+{
+  "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "company_name": "Tech Solutions Inc",
+  "business_stream": {
+    "id": "0cadc1f2-e068-42c6-89f5-e4a13fd3a595",
+    "business_stream_name": "Information Technology"
+  },
+  "profile_description": "Leading software development company specializing in AI and cloud solutions",
+  "company_website_url": "https://techsolutions.com",
+  "status": "active",
+  "open_roles_count": 3,
+  "images": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440099",
+      "image_url": "https://example.com/company-logo.png",
+      "created_at": "2025-01-15T10:30:00Z"
+    }
+  ]
+}
+```
+
 ---
 
 ## 💼 Jobs Module
 
-### 29. Create Job Type (Admin Only)
+### 31. Create Job Type (Admin Only)
 ```http
 POST /api/v1/jobs/job-types/
 Authorization: Bearer <access-token>
@@ -480,17 +565,17 @@ Content-Type: application/json
 }
 ```
 
-### 30. List Job Types
+### 32. List Job Types
 ```http
 GET /api/v1/jobs/job-types/
 ```
 
-### 31. Get Job Type
+### 33. Get Job Type
 ```http
 GET /api/v1/jobs/job-types/{id}/
 ```
 
-### 32. Update Job Type (Admin Only)
+### 34. Update Job Type (Admin Only)
 ```http
 PUT /api/v1/jobs/job-types/{id}/
 Authorization: Bearer <access-token>
@@ -502,13 +587,13 @@ Content-Type: application/json
 }
 ```
 
-### 33. Delete Job Type (Admin Only)
+### 35. Delete Job Type (Admin Only)
 ```http
 DELETE /api/v1/jobs/job-types/{id}/
 Authorization: Bearer <access-token>
 ```
 
-### 34. Create Job Location
+### 36. Create Job Location (Company or Admin)
 ```http
 POST /api/v1/jobs/job-locations/
 Authorization: Bearer <access-token>
@@ -523,17 +608,23 @@ Content-Type: application/json
 }
 ```
 
-### 35. List Job Locations
+**Note:** Requires authentication as a company-type user or an admin.
+
+### 37. List Job Locations
 ```http
 GET /api/v1/jobs/job-locations/
 ```
 
-### 36. Get Job Location
+**Note:** No authentication required — anonymous requests get a 200.
+
+### 38. Get Job Location
 ```http
 GET /api/v1/jobs/job-locations/{id}/
 ```
 
-### 37. Update Job Location
+**Note:** No authentication required.
+
+### 39. Update Job Location (Admin Only)
 ```http
 PUT /api/v1/jobs/job-locations/{id}/
 Authorization: Bearer <access-token>
@@ -548,13 +639,17 @@ Content-Type: application/json
 }
 ```
 
-### 38. Delete Job Location
+**Note:** `JobLocation` has no owner FK, so any company could otherwise edit/delete another company's location — PUT/PATCH are restricted to admins.
+
+### 40. Delete Job Location (Admin Only)
 ```http
 DELETE /api/v1/jobs/job-locations/{id}/
 Authorization: Bearer <access-token>
 ```
 
-### 39. Create Job Post (Company Only)
+**Note:** Admin only, for the same reason as above.
+
+### 41. Create Job Post (Company Only)
 ```http
 POST /api/v1/jobs/job-posts/
 Authorization: Bearer <access-token>
@@ -576,26 +671,99 @@ Content-Type: application/json
 }
 ```
 
-**Note:** The `company` is automatically set based on the authenticated user's company profile.
+**Note:** The `company` is automatically set based on the authenticated user's company profile. This write contract (bare UUIDs for `job_type`/`job_location`) is used for create/update/destroy; **list and retrieve return a different, nested read shape** — see #42 below.
 
 **Salary Type Options:** `hourly`, `monthly`, `yearly`
 
-### 40. List/Search Job Posts
+### 42. List/Search Job Posts
 ```http
 GET /api/v1/jobs/job-posts/
 ```
 
-**Query Parameters:**
-- `search` - Search in job title and description (e.g., `?search=python`)
-- `city` - Filter by city name (e.g., `?city=San Francisco`)
-- Combined: `?search=developer&city=New York`
+List and retrieve responses nest `company` (with a nested `business_stream`), `job_type`, `job_location`, and `required_skills` (each with a nested `skill_set`) instead of the bare UUIDs the write contract accepts. `job_description_hidden` is present only when the request is authenticated as the owning company or an admin — every other caller gets the field omitted entirely, not nulled.
 
-### 41. Get Job Post Details
+**Query Parameters:**
+- `search` - Matches job title, job description, company name, **and required-skill names** (e.g. `?search=python`)
+- `city` - Filter by job location city, case-insensitive contains (e.g. `?city=San Francisco`)
+- `country` - Filter by job location country, exact match
+- `job_type` - Filter by job type UUID
+- `company` - Filter by company UUID
+- `salary_type` - Filter by `hourly`/`monthly`/`yearly`
+- `is_published` - Filter by publish state
+- `business_stream` - Filter by the posting company's business stream UUID
+- `salary_min_gte` - Only jobs with `salary_min >= X`
+- `salary_max_lte` - Only jobs with `salary_max <= X`
+- `salary_floor` - "Could I earn at least X here": matches when `COALESCE(salary_max, salary_min) >= X`. A job with **both** `salary_min` and `salary_max` null never matches any `salary_floor` value.
+- `deadline_before` - Only jobs with `deadline_date <= X`
+- `required_skill` - Filter by a required skill's UUID
+- `ordering` - One of `created_at` (default, descending), `salary_min`, `salary_max`, `deadline_date`, or `salary_rank` (coalesced `salary_max`/`salary_min`; on `-salary_rank`, salary-less jobs sort **last** instead of first). Prefix with `-` to reverse, e.g. `?ordering=-salary_rank`.
+- Combined: `?search=developer&city=New York&business_stream=<uuid>&salary_floor=90000&ordering=-salary_rank`
+
+**Response:**
+```json
+{
+  "count": 1,
+  "next": null,
+  "previous": null,
+  "results": [
+    {
+      "id": "8f14e45f-ceea-4e6b-9227-b7de55ba1e23",
+      "company": {
+        "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+        "company_name": "Tech Solutions Inc",
+        "business_stream": {
+          "id": "0cadc1f2-e068-42c6-89f5-e4a13fd3a595",
+          "business_stream_name": "Information Technology"
+        }
+      },
+      "job_type": {
+        "id": "b3f79c9e-1c2e-4f2a-9a3b-7e6f2a1d4c5e",
+        "job_type_name": "Full-time"
+      },
+      "job_location": {
+        "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+        "street_address": "123 Tech Street",
+        "city": "San Francisco",
+        "country": "United States",
+        "zip": "94102",
+        "country_code": "US"
+      },
+      "required_skills": [
+        {
+          "id": "e4eaaaf2-d142-11e1-b3e4-080027620cdd",
+          "skill_set": {
+            "id": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+            "skill_name": "Python"
+          },
+          "skill_level": "Advanced",
+          "is_required": true
+        }
+      ],
+      "job_title": "Senior Python Developer",
+      "job_description": "We are seeking an experienced Python developer to join our team...",
+      "salary_min": "80000.00",
+      "salary_max": "120000.00",
+      "salary_type": "yearly",
+      "deadline_date": "2025-12-31",
+      "is_published": true,
+      "is_active": true,
+      "created_at": "2025-10-01T09:00:00Z",
+      "updated_at": "2025-10-01T09:00:00Z"
+    }
+  ]
+}
+```
+
+**Note:** `job_description_hidden` is omitted above because the caller is neither the owning company nor an admin.
+
+### 43. Get Job Post Details
 ```http
 GET /api/v1/jobs/job-posts/{id}/
 ```
 
-### 42. Update Job Post
+Same nested read shape as #42's response, for a single job post.
+
+### 44. Update Job Post
 ```http
 PUT /api/v1/jobs/job-posts/{id}/
 Authorization: Bearer <access-token>
@@ -616,7 +784,7 @@ Content-Type: application/json
 }
 ```
 
-### 43. Partial Update Job Post
+### 45. Partial Update Job Post
 ```http
 PATCH /api/v1/jobs/job-posts/{id}/
 Authorization: Bearer <access-token>
@@ -628,13 +796,13 @@ Content-Type: application/json
 }
 ```
 
-### 44. Delete Job Post
+### 46. Delete Job Post
 ```http
 DELETE /api/v1/jobs/job-posts/{id}/
 Authorization: Bearer <access-token>
 ```
 
-### 45. Apply for Job (Job Seeker Only)
+### 47. Apply for Job (Job Seeker Only)
 ```http
 POST /api/v1/jobs/apply/
 Authorization: Bearer <access-token>
@@ -666,7 +834,7 @@ Content-Type: application/json
 }
 ```
 
-### 46. List Job Applications
+### 48. List Job Applications
 ```http
 GET /api/v1/jobs/job-applications/
 Authorization: Bearer <access-token>
@@ -677,13 +845,13 @@ Authorization: Bearer <access-token>
 - Companies see applications to their job posts
 - Admins see all applications
 
-### 47. Get Job Application
+### 49. Get Job Application
 ```http
 GET /api/v1/jobs/job-applications/{id}/
 Authorization: Bearer <access-token>
 ```
 
-### 48. Update Application Status
+### 50. Update Application Status
 ```http
 PATCH /api/v1/jobs/job-applications/{id}/
 Authorization: Bearer <access-token>
@@ -696,19 +864,19 @@ Content-Type: application/json
 
 **Application Status Options:** `pending`, `reviewed`, `accepted`, `rejected`, `withdrawn`
 
-### 49. Get Applications for Specific Job (Company/Admin)
+### 51. Get Applications for Specific Job (Company/Admin)
 ```http
 GET /api/v1/jobs/applications/job/{job-id}/
 Authorization: Bearer <access-token>
 ```
 
-### 50. Get Applications by User (User/Admin)
+### 52. Get Applications by User (User/Admin)
 ```http
 GET /api/v1/jobs/applications/user/{user-id}/
 Authorization: Bearer <access-token>
 ```
 
-### 51. Add Job Skill Requirement (Company/Admin)
+### 53. Add Job Skill Requirement (Company/Admin)
 ```http
 POST /api/v1/jobs/job-skills/
 Authorization: Bearer <access-token>
@@ -724,19 +892,19 @@ Content-Type: application/json
 
 **Skill Levels:** `Beginner`, `Intermediate`, `Advanced`, `Expert`
 
-### 52. List Job Skills
+### 54. List Job Skills
 ```http
 GET /api/v1/jobs/job-skills/
 Authorization: Bearer <access-token>
 ```
 
-### 53. Get Job Skill
+### 55. Get Job Skill
 ```http
 GET /api/v1/jobs/job-skills/{id}/
 Authorization: Bearer <access-token>
 ```
 
-### 54. Update Job Skill
+### 56. Update Job Skill
 ```http
 PUT /api/v1/jobs/job-skills/{id}/
 Authorization: Bearer <access-token>
@@ -750,7 +918,7 @@ Content-Type: application/json
 }
 ```
 
-### 55. Delete Job Skill
+### 57. Delete Job Skill
 ```http
 DELETE /api/v1/jobs/job-skills/{id}/
 Authorization: Bearer <access-token>
@@ -760,7 +928,7 @@ Authorization: Bearer <access-token>
 
 ## 👨‍💼 Seekers Module
 
-### 56. Create Seeker Profile (Job Seeker Only)
+### 58. Create Seeker Profile (Job Seeker Only)
 ```http
 POST /api/v1/seekers/profiles/
 Authorization: Bearer <access-token>
@@ -778,13 +946,13 @@ Content-Type: application/json
 
 **Note:** The `user_account` is automatically set to the current user. Must be a job_seeker type user.
 
-### 57. List Seeker Profiles
+### 59. List Seeker Profiles
 ```http
 GET /api/v1/seekers/profiles/
 Authorization: Bearer <access-token>
 ```
 
-### 58. Get Seeker Profile
+### 60. Get Seeker Profile
 ```http
 GET /api/v1/seekers/profiles/{user-account-id}/
 Authorization: Bearer <access-token>
@@ -792,7 +960,7 @@ Authorization: Bearer <access-token>
 
 **Note:** The primary key is the user_account UUID.
 
-### 59. Update Seeker Profile
+### 61. Update Seeker Profile
 ```http
 PUT /api/v1/seekers/profiles/{user-account-id}/
 Authorization: Bearer <access-token>
@@ -808,7 +976,7 @@ Content-Type: application/json
 }
 ```
 
-### 60. Partial Update Seeker Profile
+### 62. Partial Update Seeker Profile
 ```http
 PATCH /api/v1/seekers/profiles/{user-account-id}/
 Authorization: Bearer <access-token>
@@ -820,13 +988,13 @@ Content-Type: application/json
 }
 ```
 
-### 61. Delete Seeker Profile
+### 63. Delete Seeker Profile
 ```http
 DELETE /api/v1/seekers/profiles/{user-account-id}/
 Authorization: Bearer <access-token>
 ```
 
-### 62. Get Seeker Dashboard
+### 64. Get Seeker Dashboard
 ```http
 GET /api/v1/seekers/dashboard/{user-id}/
 Authorization: Bearer <access-token>
@@ -865,7 +1033,7 @@ Authorization: Bearer <access-token>
 }
 ```
 
-### 63. Add Education Record
+### 65. Add Education Record
 ```http
 POST /api/v1/seekers/education/
 Authorization: Bearer <access-token>
@@ -887,19 +1055,19 @@ Content-Type: application/json
 
 **Note:** The `user_account` is automatically set to the current user.
 
-### 64. List Education Records
+### 66. List Education Records
 ```http
 GET /api/v1/seekers/education/
 Authorization: Bearer <access-token>
 ```
 
-### 65. Get Education Record
+### 67. Get Education Record
 ```http
 GET /api/v1/seekers/education/{id}/
 Authorization: Bearer <access-token>
 ```
 
-### 66. Update Education Record
+### 68. Update Education Record
 ```http
 PUT /api/v1/seekers/education/{id}/
 Authorization: Bearer <access-token>
@@ -917,13 +1085,13 @@ Content-Type: application/json
 }
 ```
 
-### 67. Delete Education Record
+### 69. Delete Education Record
 ```http
 DELETE /api/v1/seekers/education/{id}/
 Authorization: Bearer <access-token>
 ```
 
-### 68. Add Experience Record
+### 70. Add Experience Record
 ```http
 POST /api/v1/seekers/experience/
 Authorization: Bearer <access-token>
@@ -943,19 +1111,19 @@ Content-Type: application/json
 
 **Note:** Leave `end_date` as `null` for current positions. The `user_account` is automatically set to the current user.
 
-### 69. List Experience Records
+### 71. List Experience Records
 ```http
 GET /api/v1/seekers/experience/
 Authorization: Bearer <access-token>
 ```
 
-### 70. Get Experience Record
+### 72. Get Experience Record
 ```http
 GET /api/v1/seekers/experience/{id}/
 Authorization: Bearer <access-token>
 ```
 
-### 71. Update Experience Record
+### 73. Update Experience Record
 ```http
 PUT /api/v1/seekers/experience/{id}/
 Authorization: Bearer <access-token>
@@ -973,13 +1141,13 @@ Content-Type: application/json
 }
 ```
 
-### 72. Delete Experience Record
+### 74. Delete Experience Record
 ```http
 DELETE /api/v1/seekers/experience/{id}/
 Authorization: Bearer <access-token>
 ```
 
-### 73. Create Skill (Admin Only)
+### 75. Create Skill (Admin Only)
 ```http
 POST /api/v1/seekers/skills/
 Authorization: Bearer <access-token>
@@ -990,17 +1158,17 @@ Content-Type: application/json
 }
 ```
 
-### 74. List All Skills
+### 76. List All Skills
 ```http
 GET /api/v1/seekers/skills/
 ```
 
-### 75. Get Skill
+### 77. Get Skill
 ```http
 GET /api/v1/seekers/skills/{id}/
 ```
 
-### 76. Update Skill (Admin Only)
+### 78. Update Skill (Admin Only)
 ```http
 PUT /api/v1/seekers/skills/{id}/
 Authorization: Bearer <access-token>
@@ -1011,13 +1179,13 @@ Content-Type: application/json
 }
 ```
 
-### 77. Delete Skill (Admin Only)
+### 79. Delete Skill (Admin Only)
 ```http
 DELETE /api/v1/seekers/skills/{id}/
 Authorization: Bearer <access-token>
 ```
 
-### 78. Add Skill to Seeker Profile
+### 80. Add Skill to Seeker Profile
 ```http
 POST /api/v1/seekers/seeker-skills/
 Authorization: Bearer <access-token>
@@ -1034,19 +1202,19 @@ Content-Type: application/json
 
 **Note:** The `user_account` is automatically set to the current user.
 
-### 79. List Seeker Skills
+### 81. List Seeker Skills
 ```http
 GET /api/v1/seekers/seeker-skills/
 Authorization: Bearer <access-token>
 ```
 
-### 80. Get Seeker Skill
+### 82. Get Seeker Skill
 ```http
 GET /api/v1/seekers/seeker-skills/{id}/
 Authorization: Bearer <access-token>
 ```
 
-### 81. Update Seeker Skill Level
+### 83. Update Seeker Skill Level
 ```http
 PUT /api/v1/seekers/seeker-skills/{id}/
 Authorization: Bearer <access-token>
@@ -1059,7 +1227,7 @@ Content-Type: application/json
 }
 ```
 
-### 82. Delete Seeker Skill
+### 84. Delete Seeker Skill
 ```http
 DELETE /api/v1/seekers/seeker-skills/{id}/
 Authorization: Bearer <access-token>
@@ -1210,6 +1378,15 @@ curl -X POST http://localhost:8000/api/v1/jobs/apply/ \
   }'
 ```
 
+### Browse Without Authentication
+```bash
+# Filtered job search: business stream, salary floor, highest-paying first
+curl -X GET "http://localhost:8000/api/v1/jobs/job-posts/?business_stream=<uuid>&salary_floor=90000&ordering=-salary_rank"
+
+# Public company directory
+curl -X GET "http://localhost:8000/api/v1/companies/public/?search=tech"
+```
+
 ---
 
 ## 📦 Postman Collections
@@ -1217,7 +1394,7 @@ curl -X POST http://localhost:8000/api/v1/jobs/apply/ \
 Import the provided collections for organized API testing:
 
 - **Accounts API** - Authentication and user management
-- **Companies API** - Company profiles and business streams  
+- **Companies API** - Company profiles, business streams, and the public company directory
 - **Jobs API** - Job postings, applications, and requirements
 - **Seekers API** - Profiles, education, experience, and skills
 
@@ -1237,3 +1414,4 @@ Each collection includes:
 - All responses are in JSON format
 - **Pagination:** List endpoints return `{count, next, previous, results}`. Default `page_size=20`, max `100`. Override via `?page_size=N&page=M`.
 - Most endpoints require authentication via JWT Bearer token
+- **Rate limits:** anonymous requests are capped at 300/hour; see [Rate Limiting](#rate-limiting) above
