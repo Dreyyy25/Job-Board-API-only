@@ -1,3 +1,4 @@
+from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import (
     OpenApiResponse,
     extend_schema,
@@ -6,12 +7,20 @@ from drf_spectacular.utils import (
 from rest_framework import serializers as drf_serializers
 from rest_framework import viewsets, status
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.filters import SearchFilter
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from apps.accounts.authentication import CustomJWTAuthentication
 from . import services
+from .filters import PublicCompanyFilter
 from .models import BusinessStream, Company, CompanyImages
-from .serializers import BusinessStreamSerializer, CompanySerializer, CompanyImagesSerializer
+from .serializers import (
+    BusinessStreamSerializer,
+    CompanySerializer,
+    CompanyImagesSerializer,
+    PublicCompanyDetailSerializer,
+    PublicCompanyListSerializer,
+)
 from .permissions import IsAdminOrReadOnly, IsCompanyOwnerOrAdmin, IsCompanyOwnerForImages
 
 
@@ -104,6 +113,39 @@ class CompanyImagesViewSet(viewsets.ModelViewSet):
         if user.is_authenticated and user.user_type == 'company':
             return qs.for_company_user(user)
         return qs.for_active_companies()
+
+
+class PublicCompanyViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    Public company directory -- read-only, anonymous-friendly.
+
+    Deliberately a separate route from `profile/` (CompanyViewSet): that
+    viewset's `get_queryset` narrows a logged-in company user to *their own*
+    row, which is the right behavior for account management but would break
+    a public companies page for a logged-in company user. This route always
+    lists/retrieves active companies for everyone, logged in or not.
+    """
+
+    queryset = Company.objects.all()
+    authentication_classes = [CustomJWTAuthentication]
+    permission_classes = [AllowAny]
+    filter_backends = [DjangoFilterBackend, SearchFilter]
+    filterset_class = PublicCompanyFilter
+    search_fields = ['company_name', 'profile_description']
+
+    def get_queryset(self):
+        """`.order_by(...)` is explicit here because `with_open_roles_count()`'s
+        `Count(...)` annotation forces a GROUP BY, which makes Django drop the
+        model's default `Meta.ordering` (`queryset.ordered` becomes False) --
+        without this, pagination is nondeterministic across pages/requests.
+        """
+        return Company.objects.active().with_related().with_open_roles_count().order_by('company_name', 'id')
+
+    def get_serializer_class(self):
+        """Retrieve adds `images`; list stays without it."""
+        if self.action == 'retrieve':
+            return PublicCompanyDetailSerializer
+        return PublicCompanyListSerializer
 
 
 @extend_schema(
