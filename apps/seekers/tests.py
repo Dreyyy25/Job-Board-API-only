@@ -2,7 +2,7 @@ from rest_framework.test import APITestCase
 from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
 from apps.accounts.models import UserAccount
-from apps.seekers.models import EducationData
+from apps.seekers.models import EducationData, SkillSet, SeekerSkillSet
 
 
 def _auth(client, user):
@@ -154,3 +154,25 @@ class SeekerProfileCreateConflictTests(APITestCase):
         )
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("detail", r.data)
+
+
+class SeekerSkillNestedReadTests(APITestCase):
+    def setUp(self):
+        self.seeker = UserAccount.objects.create_user(
+            email='skill-seeker@example.com', password='Str0ng-Password!', user_type='job_seeker')
+        self.skill = SkillSet.objects.create(skill_name='Python')
+        self.row = SeekerSkillSet.objects.create(
+            user_account=self.seeker, skill_set=self.skill, skill_level='Advanced')
+        refresh = RefreshToken.for_user(self.seeker)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {refresh.access_token}')
+
+    def test_list_nests_skill_name(self):
+        r = self.client.get('/api/v1/seekers/seeker-skills/')
+        row = r.data['results'][0]
+        self.assertEqual(row['skill_set']['skill_name'], 'Python')
+        self.assertEqual(row['skill_level'], 'Advanced')
+
+    def test_dashboard_skills_nest_skill_name(self):
+        r = self.client.get(f'/api/v1/seekers/dashboard/{self.seeker.id}/')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data['skills'][0]['skill_set']['skill_name'], 'Python')

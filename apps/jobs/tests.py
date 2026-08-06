@@ -4,8 +4,8 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
 from apps.accounts.models import UserAccount
-from apps.companies.models import BusinessStream
-from apps.jobs.models import JobType, JobLocation, JobPost, JobPostSkillSet
+from apps.companies.models import BusinessStream, Company
+from apps.jobs.models import JobType, JobLocation, JobPost, JobPostActivity, JobPostSkillSet
 from apps.seekers.models import SkillSet
 
 
@@ -895,3 +895,65 @@ class JobPostQueryCountTests(APITestCase):
         self.assertIsInstance(sample["job_type"], dict)
         self.assertIsInstance(sample["job_location"], dict)
         self.assertIn("required_skills", sample)
+
+
+class ApplicationNestedReadTests(APITestCase):
+    """List/retrieve applications return a nested job_post summary; write shape unchanged."""
+
+    def setUp(self):
+        self.seeker = UserAccount.objects.create_user(
+            email='nested-seeker@example.com', password='Str0ng-Password!', user_type='job_seeker')
+        self.company_user = UserAccount.objects.create_user(
+            email='nested-co@example.com', password='Str0ng-Password!', user_type='company')
+        company = Company.objects.get(user_account=self.company_user)
+        company.company_name = 'Nested Co'
+        company.save()
+        jt = JobType.objects.create(job_type_name='Full-time')
+        loc = JobLocation.objects.create(city='Berlin', country='Germany')
+        self.job = JobPost.objects.create(
+            company=company, job_type=jt, job_location=loc, job_title='ML Engineer',
+            job_description='d', salary_min=90000, salary_max=120000, salary_type='yearly')
+        self.app = JobPostActivity.objects.create(user_account=self.seeker, job_post=self.job)
+        refresh = RefreshToken.for_user(self.seeker)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {refresh.access_token}')
+
+    def test_list_returns_nested_job_post_summary(self):
+        r = self.client.get('/api/v1/jobs/job-applications/')
+        self.assertEqual(r.status_code, 200)
+        row = r.data['results'][0]
+        self.assertEqual(row['job_post'], {
+            'id': str(self.job.id),
+            'job_title': 'ML Engineer',
+            'company': {'id': str(self.job.company_id), 'company_name': 'Nested Co'},
+            'job_type': {'id': str(self.job.job_type_id), 'job_type_name': 'Full-time'},
+            'job_location': {'city': 'Berlin', 'country': 'Germany'},
+            'salary_min': '90000.00', 'salary_max': '120000.00', 'salary_type': 'yearly',
+            'deadline_date': None, 'is_published': True, 'is_active': True,
+        })
+
+    def test_unpublished_job_still_nested_for_the_applicant(self):
+        self.job.is_published = False
+        self.job.save()
+        r = self.client.get(f'/api/v1/jobs/job-applications/{self.app.id}/')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data['job_post']['job_title'], 'ML Engineer')
+        self.assertFalse(r.data['job_post']['is_published'])
+
+    def test_user_applications_view_is_nested_too(self):
+        r = self.client.get(f'/api/v1/jobs/applications/user/{self.seeker.id}/')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data[0]['job_post']['company']['company_name'], 'Nested Co')
+
+    def test_list_query_count_is_flat(self):
+        for i in range(10):
+            u = UserAccount.objects.create_user(
+                email=f'ns{i}@example.com', password='Str0ng-Password!', user_type='job_seeker')
+            JobPostActivity.objects.create(user_account=u, job_post=self.job)
+        staff = UserAccount.objects.create_user(
+            email='ns-admin@example.com', password='Str0ng-Password!', user_type='job_seeker')
+        staff.is_staff = True
+        staff.save()
+        refresh = RefreshToken.for_user(staff)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {refresh.access_token}')
+        with self.assertNumQueries(3):  # count + page + auth user lookup
+            self.client.get('/api/v1/jobs/job-applications/?page_size=50')

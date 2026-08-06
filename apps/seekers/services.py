@@ -36,16 +36,16 @@ def build_seeker_dashboard(requester, user_id):
         EducationDataSerializer,
         ExperienceDataSerializer,
         SeekerProfileSerializer,
-        SeekerSkillSetSerializer,
+        SeekerSkillSetReadSerializer,
     )
 
     education = EducationData.objects.for_user(profile.user_account).with_related()
     experience = ExperienceData.objects.for_user(profile.user_account).with_related()
-    skills = SeekerSkillSet.objects.for_user(profile.user_account).with_related()
+    skills = SeekerSkillSet.objects.for_user(profile.user_account).with_related().select_related('skill_set')
 
     return {
         'profile': SeekerProfileSerializer(profile).data,
         'education': EducationDataSerializer(education, many=True).data,
         'experience': ExperienceDataSerializer(experience, many=True).data,
-        'skills': SeekerSkillSetSerializer(skills, many=True).data,
+        'skills': SeekerSkillSetReadSerializer(skills, many=True).data,
     }

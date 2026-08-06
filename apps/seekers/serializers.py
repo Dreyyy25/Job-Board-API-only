@@ -94,3 +94,12 @@ class SeekerSkillSetSerializer(serializers.ModelSerializer):
         model = SeekerSkillSet
         fields = ['id', 'user_account', 'skill_set', 'skill_level']
         read_only_fields = ['id', 'user_account']
+
+
+class SeekerSkillSetReadSerializer(serializers.ModelSerializer):
+    skill_set = SkillSetSerializer(read_only=True)
+
+    class Meta:
+        model = SeekerSkillSet
+        fields = ['id', 'user_account', 'skill_set', 'skill_level']
+        read_only_fields = fields

@@ -58,9 +58,8 @@ class JobPostActivityQuerySet(models.QuerySet):
 
     def with_related(self):
         return self.select_related(
-            'user_account',
-            'job_post',
-            'job_post__company',
+            'user_account', 'job_post', 'job_post__company',
+            'job_post__job_type', 'job_post__job_location',
         )
 
 
