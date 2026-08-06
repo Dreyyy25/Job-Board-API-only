@@ -141,7 +141,7 @@ Content-Type: application/json
 {
   "user_type": "job_seeker",
   "email": "jobseeker@example.com",
-  "password": "password123",
+  "password": "SmokeTest12345",
   "date_of_birth": "1995-03-15",
   "contact_number": "+1234567890",
   "sex": "M",
@@ -159,7 +159,6 @@ Content-Type: application/json
     "user_type": "job_seeker"
   },
   "tokens": {
-    "refresh": "eyJ0eXAiOiJKV1QiLCJhbGc...",
     "access": "eyJ0eXAiOiJKV1QiLCJhbGc..."
   }
 }
@@ -173,7 +172,7 @@ Content-Type: application/json
 {
   "user_type": "company",
   "email": "company@techsolutions.com",
-  "password": "securepass456",
+  "password": "SecurePass456!x",
   "contact_number": "+1-555-0100"
 }
 ```
@@ -185,7 +184,7 @@ Content-Type: application/json
 
 {
   "email": "jobseeker@example.com",
-  "password": "password123"
+  "password": "SmokeTest12345"
 }
 ```
 
@@ -199,20 +198,21 @@ Content-Type: application/json
     "user_type": "job_seeker"
   },
   "tokens": {
-    "refresh": "eyJ0eXAiOiJKV1QiLCJhbGc...",
     "access": "eyJ0eXAiOiJKV1QiLCJhbGc..."
   }
 }
 ```
 
 ### 4. Refresh Token
+
+The refresh token never travels in a request or response body — `register`/
+`login` set it as an httpOnly cookie scoped to `/api/v1/accounts/`, and this
+endpoint reads **only** that cookie (a body, if sent, is ignored). Browsers
+attach the cookie automatically; the response rotates it via `Set-Cookie`.
+
 ```http
 POST /api/v1/accounts/token/refresh/
-Content-Type: application/json
-
-{
-  "refresh": "eyJ0eXAiOiJKV1QiLCJhbGc..."
-}
+Cookie: refresh_token=eyJ0eXAiOiJKV1QiLCJhbGc...
 ```
 
 **Response:**
@@ -1177,7 +1177,7 @@ curl -X POST http://localhost:8000/api/v1/accounts/register/ \
   -H "Content-Type: application/json" \
   -d '{
     "email": "test@example.com",
-    "password": "testpass123",
+    "password": "SmokeTest12345",
     "user_type": "job_seeker"
   }'
 
@@ -1186,7 +1186,7 @@ curl -X POST http://localhost:8000/api/v1/accounts/login/ \
   -H "Content-Type: application/json" \
   -d '{
     "email": "test@example.com",
-    "password": "testpass123"
+    "password": "SmokeTest12345"
   }'
 ```
 

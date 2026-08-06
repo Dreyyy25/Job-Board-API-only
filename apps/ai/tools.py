@@ -8,6 +8,7 @@ another person's data. Every tool is read-only; the agent has no write path.
 Tool output is model input, and model input is billed, so every string
 returned here is length-capped.
 """
+
 from django.core.exceptions import ValidationError
 
 from apps.jobs.models import JobPost
@@ -76,11 +77,13 @@ def build_tools(user):
         job = _get_published_job(job_post_id)
         if job is None:
             return NOT_FOUND
-        skills = ", ".join(
-            f"{s.skill_set.skill_name} ({s.skill_level},"
-            f" {'required' if s.is_required else 'nice-to-have'})"
-            for s in job.required_skills.all()[:MAX_JOB_SKILLS]
-        ) or "none listed"
+        skills = (
+            ", ".join(
+                f"{s.skill_set.skill_name} ({s.skill_level}, {'required' if s.is_required else 'nice-to-have'})"
+                for s in job.required_skills.all()[:MAX_JOB_SKILLS]
+            )
+            or "none listed"
+        )
         salary = ""
         if job.salary_min or job.salary_max:
             salary = f"\nSalary: {job.salary_min or '?'} - {job.salary_max or '?'}"
@@ -97,22 +100,23 @@ def build_tools(user):
     def get_my_profile() -> str:
         """The requesting job seeker's own profile, skills, education and experience."""
         profile = getattr(user, 'seeker_profile', None)
-        name = (f"{profile.first_name} {profile.last_name}".strip()
-                if profile is not None else "")
+        name = f"{profile.first_name} {profile.last_name}".strip() if profile is not None else ""
         lines = [f"Name: {name or 'Not provided'}"]
         if profile is not None and profile.goals:
             lines.append(f"Goals: {profile.goals[:MAX_TOOL_DESCRIPTION_CHARS]}")
         # for_user(...).with_related() select_relates skill_set — reading
         # s.skill_set off a bare reverse FK would be one query per skill.
-        skills = [f"{s.skill_set.skill_name} ({s.skill_level})"
-                  for s in SeekerSkillSet.objects.for_user(user)
-                  .with_related()[:MAX_PROFILE_ROWS]]
+        skills = [
+            f"{s.skill_set.skill_name} ({s.skill_level})"
+            for s in SeekerSkillSet.objects.for_user(user).with_related()[:MAX_PROFILE_ROWS]
+        ]
         lines.append("Skills: " + (", ".join(skills) or "none listed"))
         for edu in user.education.all()[:MAX_PROFILE_ROWS]:
             lines.append(
                 f"Education: {edu.degree_type or 'Unspecified'} in "
                 f"{edu.field_of_study or 'unspecified field'} at "
-                f"{edu.institute_university_name or 'unnamed institution'}")
+                f"{edu.institute_university_name or 'unnamed institution'}"
+            )
         for exp in user.experiences.all()[:MAX_PROFILE_ROWS]:
             lines.append(f"Experience: {exp.position} at {exp.company_name}")
         # The user's email is deliberately absent — same privacy rule as dossiers.
@@ -130,10 +134,8 @@ def build_tools(user):
             return NOT_FOUND
         # Same MAX_JOB_SKILLS cap as get_job_details — a company-controlled
         # skill count must not translate into unbounded billed tool output.
-        required = {s.skill_set.skill_name
-                    for s in job.required_skills.all()[:MAX_JOB_SKILLS]}
-        mine = {s.skill_set.skill_name
-                for s in SeekerSkillSet.objects.for_user(user).with_related()}
+        required = {s.skill_set.skill_name for s in job.required_skills.all()[:MAX_JOB_SKILLS]}
+        mine = {s.skill_set.skill_name for s in SeekerSkillSet.objects.for_user(user).with_related()}
         matched = sorted(required & mine)
         missing = sorted(required - mine)
         return (

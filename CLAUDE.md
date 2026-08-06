@@ -26,6 +26,18 @@ A `.env` file is required at the repo root. Required keys: `SECRET_KEY`, `DB_NAM
 
 All env access goes through `config.py` at the repo root. `jobApp/settings.py` and `jobApp/urls.py` import plain Python constants from it. Do **not** add new `os.getenv()` calls scattered through the codebase — extend `config.py` instead.
 
+## CI and git workflow
+
+CI is a single GitHub Actions job (`ci` in `.github/workflows/ci.yml`) that runs on every PR and on pushes to `staging`/`main`: `ruff check`, `ruff format --check`, `makemigrations --check --dry-run`, `spectacular --validate --fail-on-warn`, production `check --deploy`, and the full test suite against a `postgres:18` service. All env values in the workflow are dummies — it uses no secrets, so Dependabot/fork PRs are safe. The test step uses `--keepdb` deliberately: the runner is discarded, and skipping the teardown `DROP DATABASE` sidesteps the autovacuum race described above. Never add `ai_smoke` (billable) or `ai_checkpointer_setup` (deploy step) to CI.
+
+Ruff is the linter/formatter: `uv run ruff check .` and `uv run ruff format .` locally before pushing. Lint rules are pinned to `E4/E7/E9/F` in `pyproject.toml` — don't widen the selection casually; ruff's own defaults are broader and will flood the diff. The one-time format-normalization commit is listed in `.git-blame-ignore-revs` (GitHub's blame view respects it automatically; locally run `git config blame.ignoreRevsFile .git-blame-ignore-revs` once).
+
+`staging` and `main` are protected by rulesets: changes land via PR with a green `ci` check — direct pushes are rejected, force pushes and deletions blocked, and the only merge method is a merge commit. Consequence: `staging` → `main` promotions are PRs, `main` gains one merge commit per promotion, and the two branches are no longer SHA-identical — that is expected, not drift. Merged head branches auto-delete on GitHub; prune locally with `git fetch --prune`.
+
+## Docker and deployment
+
+`Dockerfile` builds the production image: multi-stage uv → `python:3.13-slim`, non-root user, whitenoise-served static files collected at build time under production settings with inline dummy env. The entrypoint (`docker/entrypoint.sh`) runs `migrate` + `ai_checkpointer_setup` (both idempotent — Render's free tier has no pre-deploy hook) and then gunicorn with `--timeout 120`, which must stay above the AI chat's 90 s deadline. `docker compose up --build` runs that exact image against Postgres 18 locally — copy `.env.docker.example` to `.env.docker` (git-ignored) first. `GET /healthz` is a plain-Django health endpoint (cheap DB ping, no DRF, deliberately invisible to the OpenAPI schema). Render deployment — env table, health-check path, free-tier caveats — is documented in `DEPLOYMENT.md`; registry push and Render service setup are user-owned. Shell scripts are forced to LF via `.gitattributes` — don't commit `.sh` files with CRLF.
+
 ## Architecture
 
 Django 5.2 + DRF monolith with JWT auth. Four domain apps under `apps/`, each mounted under `/api/v1/<app>/` by `jobApp/urls.py`. The admin URL path is read from the `ADMIN_URL` env var (default `admin/`).

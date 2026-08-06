@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [staging, main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: job_board
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Every value below is a CI-only dummy. This workflow uses no secrets.
+      SECRET_KEY: ci-only-dummy-key-not-a-secret-0123456789abcdefghijklmnopqrstuvwxyz
+      DB_NAME: job_board
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_HOST: 127.0.0.1
+      DB_PORT: "5432"
+      GEMINI_API_KEY: ci-dummy
+      ALLOWED_HOSTS: ci.invalid
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --locked
+      - name: Lint
+        run: uv run ruff check .
+      - name: Format check
+        run: uv run ruff format --check .
+      - name: Missing-migration check
+        run: uv run python manage.py makemigrations --check --dry-run
+      - name: OpenAPI schema validation
+        run: uv run python manage.py spectacular --validate --fail-on-warn > /dev/null
+      - name: Production deploy check
+        env:
+          DJANGO_SETTINGS_MODULE: jobApp.settings.production
+          DEBUG: "false"
+          SECURE_SSL_REDIRECT: "true"
+          SECURE_HSTS_SECONDS: "31536000"
+          CORS_ALLOWED_ORIGINS: https://ci.invalid
+          CSRF_TRUSTED_ORIGINS: https://ci.invalid
+        run: uv run python manage.py check --deploy
+      - name: Tests
+        run: uv run python manage.py test --noinput --keepdb

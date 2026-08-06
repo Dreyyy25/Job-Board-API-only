@@ -12,6 +12,7 @@ dependencies = [
     "djangorestframework==3.16.1",
     "djangorestframework-simplejwt==5.5.1",
     "drf-spectacular>=0.29.0",
+    "gunicorn>=26.0.0",
     "langchain>=1.3,<2",
     "langchain-google-genai>=4.2,<5",
     "langgraph>=1.2,<2",
@@ -20,7 +21,33 @@ dependencies = [
     "psycopg[binary,pool]>=3.2,<4",
     "pyjwt>=2.13.0",
     "python-dotenv>=1.2.2",
+    "whitenoise>=6.12.0",
 ]
 
 [tool.uv]
 package = false
+
+[dependency-groups]
+dev = [
+    "ruff>=0.16.1",
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 120
+extend-exclude = ["migrations", "docs"]
+
+[tool.ruff.format]
+# Keep existing quote characters — formatting normalizes whitespace only.
+quote-style = "preserve"
+
+[tool.ruff.lint]
+# Pinned deliberately: installed ruff's defaults are wider (I, RUF, SIM, ...)
+# and would force a large noisy cleanup. Stricter sets are future follow-ups.
+select = ["E4", "E7", "E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# Test modules accrete section-scoped imports between test classes; harmless.
+"apps/*/tests.py" = ["E402"]
+# Django settings idiom: star-import from base, then reference/override names.
+"jobApp/settings/*" = ["F403", "F405"]

@@ -7,6 +7,7 @@ Runs on psycopg v3 with its own connection pool, entirely separate from
 Django's psycopg2 connections. Nothing here participates in a Django
 transaction — see `delete_conversation` in services.py for what that means.
 """
+
 from urllib.parse import quote
 
 from django.conf import settings
@@ -30,10 +31,7 @@ def build_conn_string() -> str:
     somewhere else. quote, not quote_plus — the latter encodes a space as '+',
     which is a literal '+' in URI userinfo, not a space.
     """
-    return (
-        f"postgresql://{quote(DB_USER, safe='')}:{quote(DB_PASSWORD, safe='')}"
-        f"@{DB_HOST}:{DB_PORT}/{DB_NAME}"
-    )
+    return f"postgresql://{quote(DB_USER, safe='')}:{quote(DB_PASSWORD, safe='')}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
 
 def get_checkpointer():
@@ -55,7 +53,8 @@ def get_checkpointer():
                 'apps.ai.checkpointer.get_checkpointer() was called for real '
                 'during the test suite. Inject a fake/in-memory checkpointer, '
                 'or patch get_checkpointer where it is looked up, instead of '
-                'letting this function open a live Postgres pool.')
+                'letting this function open a live Postgres pool.'
+            )
         _pool = ConnectionPool(
             conninfo=build_conn_string(),
             min_size=1,
@@ -74,13 +73,17 @@ def get_checkpointer():
         # LANGGRAPH_STRICT_MSGPACK env var cannot be relied on here: langgraph
         # reads it into a module constant at import time, before this module
         # ever runs.
-        _checkpointer = PostgresSaver(
-            _pool, serde=JsonPlusSerializer(allowed_msgpack_modules=None))
+        _checkpointer = PostgresSaver(_pool, serde=JsonPlusSerializer(allowed_msgpack_modules=None))
     return _checkpointer
 
 
 def reset_checkpointer():
-    """Drop the singleton. Tests only — production never tears the pool down."""
+    """Drop the singleton and close its pool.
+
+    For tests and short-lived management commands (ai_checkpointer_setup).
+    The long-lived web process never calls this — its pool stays open for
+    the process lifetime by design.
+    """
     global _checkpointer, _pool
     if _pool is not None:
         try:

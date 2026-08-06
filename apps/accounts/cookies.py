@@ -6,6 +6,7 @@ functions read their attributes from settings.AUTH_REFRESH_COOKIE /
 settings.AUTH_REFRESH_COOKIE_SECURE so prod can flip attributes (e.g.
 ``secure``) without a code change.
 """
+
 from django.conf import settings
 
 

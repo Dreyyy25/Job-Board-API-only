@@ -3,9 +3,10 @@ from rest_framework import exceptions
 
 from .models import UserAccount
 
+
 class CustomJWTAuthentication(JWTAuthentication):
     """JWT Authentication that uses UserAccount model instead of Django's User model"""
-    
+
     def get_user(self, validated_token):
         """
         Attempts to find and return a UserAccount using the given validated token.

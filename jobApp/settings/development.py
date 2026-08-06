@@ -1,4 +1,5 @@
 """Development settings — loose defaults optimized for local iteration."""
+
 from .base import *  # noqa: F401,F403
 
 DEBUG = True

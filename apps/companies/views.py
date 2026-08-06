@@ -1,6 +1,5 @@
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import (
-    OpenApiResponse,
     extend_schema,
     inline_serializer,
 )

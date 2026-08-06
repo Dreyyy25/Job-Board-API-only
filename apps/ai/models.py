@@ -22,7 +22,9 @@ class AIUsageLog(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     feature = models.CharField(max_length=32, choices=Feature.choices)
     user = models.ForeignKey(
-        settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL,
+        settings.AUTH_USER_MODEL,
+        null=True,
+        on_delete=models.SET_NULL,
         related_name='ai_usage_logs',
     )
     model = models.CharField(max_length=100)
@@ -51,8 +53,7 @@ class ScreeningReport(models.Model):
     """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    job_post = models.ForeignKey(
-        JobPost, on_delete=models.CASCADE, related_name='screening_reports')
+    job_post = models.ForeignKey(JobPost, on_delete=models.CASCADE, related_name='screening_reports')
     report = models.JSONField(default=dict)
     applicant_count = models.PositiveIntegerField(default=0)
     created_at = models.DateTimeField(default=timezone.now)
@@ -63,8 +64,7 @@ class ScreeningReport(models.Model):
     class Meta:
         ordering = ['-created_at']
         indexes = [
-            models.Index(fields=['job_post', '-created_at'],
-                         name='screening_job_created_idx'),
+            models.Index(fields=['job_post', '-created_at'], name='screening_job_created_idx'),
         ]
 
 
@@ -82,7 +82,8 @@ class Conversation(models.Model):
     # content that must die with the account, not a billing record that must
     # outlive it.
     user = models.ForeignKey(
-        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
         related_name='ai_conversations',
     )
     title = models.CharField(max_length=60)
