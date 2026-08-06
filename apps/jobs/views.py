@@ -6,7 +6,7 @@ from drf_spectacular.utils import (
 from rest_framework import serializers as drf_serializers
 from rest_framework import viewsets, status
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, IsAuthenticatedOrReadOnly
 from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
 from django_filters.rest_framework import DjangoFilterBackend
@@ -20,6 +20,7 @@ from .serializers import (
     JobTypeSerializer,
     JobLocationSerializer,
     JobPostSerializer,
+    JobPostReadSerializer,
     JobPostActivitySerializer,
     JobPostSkillSetSerializer,
 )
@@ -79,7 +80,7 @@ class JobLocationViewSet(viewsets.ModelViewSet):
     queryset = JobLocation.objects.all()
     serializer_class = JobLocationSerializer
     authentication_classes = [CustomJWTAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticatedOrReadOnly]
 
 
 class JobPostViewSet(viewsets.ModelViewSet):
@@ -99,13 +100,24 @@ class JobPostViewSet(viewsets.ModelViewSet):
     throttle_classes = [AnonRateThrottle, UserRateThrottle, BurstRateThrottle]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_class = JobPostFilter
-    search_fields = ['job_title', 'job_description', 'company__company_name']
-    ordering_fields = ['created_at', 'salary_max', 'salary_min', 'deadline_date']
+    search_fields = [
+        'job_title',
+        'job_description',
+        'company__company_name',
+        'required_skills__skill_set__skill_name',
+    ]
+    ordering_fields = ['created_at', 'salary_max', 'salary_min', 'deadline_date', 'salary_rank']
     ordering = ['-created_at']
+
+    def get_serializer_class(self):
+        """Nested read shape for list/retrieve; UUID-in write contract otherwise."""
+        if self.action in ('list', 'retrieve'):
+            return JobPostReadSerializer
+        return JobPostSerializer
 
     def get_queryset(self):
         """Admins → all; company → their own (published + drafts); else → published."""
-        qs = JobPost.objects.with_related()
+        qs = JobPost.objects.with_related().with_salary_rank()
         user = self.request.user
         if user.is_staff or user.is_superuser:
             return qs
