@@ -32,3 +32,46 @@ class CompanyImagesSerializer(serializers.ModelSerializer):
         model = CompanyImages
         fields = ['id', 'company', 'image_url', 'created_at']
         read_only_fields = ['id', 'created_at']
+
+
+class CompanyImagesRefSerializer(serializers.ModelSerializer):
+    """Minimal image shape nested inside a public company retrieve response."""
+
+    class Meta:
+        model = CompanyImages
+        fields = ['id', 'image_url', 'created_at']
+        read_only_fields = fields
+
+
+class PublicCompanyListSerializer(serializers.ModelSerializer):
+    """Public read shape for the company directory (list + retrieve base).
+
+    Deliberately excludes `contact_email` and `user_account` by not listing
+    them -- neither belongs in an anonymous payload.
+    """
+
+    business_stream = BusinessStreamSerializer(read_only=True)
+    open_roles_count = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = Company
+        fields = [
+            'id',
+            'company_name',
+            'business_stream',
+            'profile_description',
+            'company_website_url',
+            'status',
+            'open_roles_count',
+        ]
+        read_only_fields = fields
+
+
+class PublicCompanyDetailSerializer(PublicCompanyListSerializer):
+    """Public read shape for a single company; adds `images`."""
+
+    images = CompanyImagesRefSerializer(many=True, read_only=True)
+
+    class Meta(PublicCompanyListSerializer.Meta):
+        fields = PublicCompanyListSerializer.Meta.fields + ['images']
+        read_only_fields = fields

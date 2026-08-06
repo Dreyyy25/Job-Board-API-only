@@ -2,7 +2,8 @@ from rest_framework.test import APITestCase
 from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
 from apps.accounts.models import UserAccount
-from apps.companies.models import BusinessStream
+from apps.companies.models import BusinessStream, Company
+from apps.jobs.models import JobLocation, JobPost, JobType
 
 
 class CompanySerializerTests(APITestCase):
@@ -118,6 +119,21 @@ class CompanyQueryCountTests(APITestCase):
         )
 
 
+class CompanyImagesAnonymousReadTests(APITestCase):
+    def test_anonymous_can_list_company_images(self):
+        owner = UserAccount.objects.create_user(
+            email="img-owner@example.com", password="Str0ng-Password!", user_type="company"
+        )
+        stream = BusinessStream.objects.create(business_stream_name="Img Tech")
+        company = owner.company_profile
+        company.company_name = "ImgCo"
+        company.business_stream = stream
+        company.save()
+        CompanyImages.objects.create(company=company, image_url="https://x.invalid/a.png")
+        r = self.client.get("/api/v1/companies/company-images/")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+
+
 class CompanyCreateConflictTests(APITestCase):
     def test_company_create_returns_400_when_profile_exists(self):
         user = UserAccount.objects.create_user(
@@ -139,3 +155,314 @@ class CompanyCreateConflictTests(APITestCase):
         )
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("detail", r.data)
+
+
+class PublicCompanyListTests(APITestCase):
+    """Task 4: /api/v1/companies/public/ list -- anonymous, active-only, shape."""
+
+    def setUp(self):
+        self.stream = BusinessStream.objects.create(business_stream_name="Public Tech")
+
+        active_owner = UserAccount.objects.create_user(
+            email="pub-active@example.com", password="Str0ng-Password!", user_type="company"
+        )
+        self.active_co = active_owner.company_profile
+        self.active_co.company_name = "Active Co"
+        self.active_co.business_stream = self.stream
+        self.active_co.profile_description = "We build things"
+        self.active_co.company_website_url = "https://active.example.com"
+        self.active_co.contact_email = "secret@active.example.com"
+        self.active_co.save()
+
+        inactive_owner = UserAccount.objects.create_user(
+            email="pub-inactive@example.com", password="Str0ng-Password!", user_type="company"
+        )
+        self.inactive_co = inactive_owner.company_profile
+        self.inactive_co.company_name = "Inactive Co"
+        self.inactive_co.business_stream = self.stream
+        self.inactive_co.status = "inactive"
+        self.inactive_co.save()
+
+        suspended_owner = UserAccount.objects.create_user(
+            email="pub-suspended@example.com", password="Str0ng-Password!", user_type="company"
+        )
+        self.suspended_co = suspended_owner.company_profile
+        self.suspended_co.company_name = "Suspended Co"
+        self.suspended_co.business_stream = self.stream
+        self.suspended_co.status = "suspended"
+        self.suspended_co.save()
+
+    def test_anonymous_list_only_returns_active_companies(self):
+        r = self.client.get("/api/v1/companies/public/")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        ids = {c["id"] for c in r.data["results"]}
+        self.assertIn(str(self.active_co.id), ids)
+        self.assertNotIn(str(self.inactive_co.id), ids)
+        self.assertNotIn(str(self.suspended_co.id), ids)
+
+    def test_list_item_shape(self):
+        r = self.client.get("/api/v1/companies/public/")
+        sample = next(c for c in r.data["results"] if c["id"] == str(self.active_co.id))
+        self.assertEqual(sample["company_name"], "Active Co")
+        self.assertEqual(
+            sample["business_stream"],
+            {"id": str(self.stream.id), "business_stream_name": "Public Tech"},
+        )
+        self.assertEqual(sample["profile_description"], "We build things")
+        self.assertEqual(sample["company_website_url"], "https://active.example.com")
+        self.assertEqual(sample["status"], "active")
+        self.assertEqual(sample["open_roles_count"], 0)
+
+    def test_list_excludes_contact_email_and_user_account(self):
+        r = self.client.get("/api/v1/companies/public/")
+        sample = next(c for c in r.data["results"] if c["id"] == str(self.active_co.id))
+        self.assertNotIn("contact_email", sample)
+        self.assertNotIn("user_account", sample)
+
+
+class PublicCompanyOpenRolesCountTests(APITestCase):
+    """Task 4: open_roles_count counts only is_published=True, is_active=True posts,
+    and must not multiply through the images prefetch."""
+
+    def setUp(self):
+        stream = BusinessStream.objects.create(business_stream_name="Roles Tech")
+        owner = UserAccount.objects.create_user(
+            email="pub-roles@example.com", password="Str0ng-Password!", user_type="company"
+        )
+        self.company = owner.company_profile
+        self.company.company_name = "Roles Co"
+        self.company.business_stream = stream
+        self.company.save()
+
+        job_type = JobType.objects.create(job_type_name="Public Full-time")
+        location = JobLocation.objects.create(city="Cebu", country="PH")
+
+        # Published + active: should count.
+        JobPost.objects.create(
+            company=self.company,
+            job_type=job_type,
+            job_location=location,
+            job_title="Open Role 1",
+            job_description="...",
+            is_published=True,
+            is_active=True,
+        )
+        JobPost.objects.create(
+            company=self.company,
+            job_type=job_type,
+            job_location=location,
+            job_title="Open Role 2",
+            job_description="...",
+            is_published=True,
+            is_active=True,
+        )
+        # Unpublished: should not count.
+        JobPost.objects.create(
+            company=self.company,
+            job_type=job_type,
+            job_location=location,
+            job_title="Draft Role",
+            job_description="...",
+            is_published=False,
+            is_active=True,
+        )
+        # Inactive: should not count.
+        JobPost.objects.create(
+            company=self.company,
+            job_type=job_type,
+            job_location=location,
+            job_title="Closed Role",
+            job_description="...",
+            is_published=True,
+            is_active=False,
+        )
+        # Multiple images -- guards against the annotation multiplying rows
+        # through the images prefetch.
+        for i in range(3):
+            CompanyImages.objects.create(company=self.company, image_url=f"https://x.invalid/{i}.png")
+
+    def test_open_roles_count_counts_only_published_and_active(self):
+        r = self.client.get("/api/v1/companies/public/")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        matches = [c for c in r.data["results"] if c["id"] == str(self.company.id)]
+        self.assertEqual(
+            len(matches),
+            1,
+            "company row duplicated -- annotation likely multiplied through the images prefetch",
+        )
+        self.assertEqual(matches[0]["open_roles_count"], 2)
+
+
+class PublicCompanyRetrieveTests(APITestCase):
+    """Task 4: retrieve adds images; excludes contact_email/user_account; active-only."""
+
+    def setUp(self):
+        stream = BusinessStream.objects.create(business_stream_name="Retrieve Tech")
+        owner = UserAccount.objects.create_user(
+            email="pub-retrieve@example.com", password="Str0ng-Password!", user_type="company"
+        )
+        self.company = owner.company_profile
+        self.company.company_name = "Retrieve Co"
+        self.company.business_stream = stream
+        self.company.contact_email = "hidden@retrieve.example.com"
+        self.company.save()
+        self.image = CompanyImages.objects.create(company=self.company, image_url="https://x.invalid/logo.png")
+
+    def test_retrieve_includes_images(self):
+        r = self.client.get(f"/api/v1/companies/public/{self.company.id}/")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertIn("images", r.data)
+        self.assertEqual(len(r.data["images"]), 1)
+        image = r.data["images"][0]
+        self.assertEqual(image["id"], str(self.image.id))
+        self.assertEqual(image["image_url"], "https://x.invalid/logo.png")
+        self.assertIn("created_at", image)
+        self.assertNotIn("company", image)
+
+    def test_retrieve_excludes_contact_email_and_user_account(self):
+        r = self.client.get(f"/api/v1/companies/public/{self.company.id}/")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertNotIn("contact_email", r.data)
+        self.assertNotIn("user_account", r.data)
+
+    def test_retrieve_404s_for_inactive_company(self):
+        self.company.status = "inactive"
+        self.company.save()
+        r = self.client.get(f"/api/v1/companies/public/{self.company.id}/")
+        self.assertEqual(r.status_code, status.HTTP_404_NOT_FOUND)
+
+
+class PublicCompanyReadOnlyTests(APITestCase):
+    """Task 4: POST/PATCH/DELETE never succeed on the public endpoint."""
+
+    def setUp(self):
+        stream = BusinessStream.objects.create(business_stream_name="Write Tech")
+        owner = UserAccount.objects.create_user(
+            email="pub-write@example.com", password="Str0ng-Password!", user_type="company"
+        )
+        self.company = owner.company_profile
+        self.company.company_name = "Write Co"
+        self.company.business_stream = stream
+        self.company.save()
+
+    def test_post_never_succeeds(self):
+        r = self.client.post(
+            "/api/v1/companies/public/",
+            {"company_name": "New", "business_stream": str(self.company.business_stream_id)},
+            format="json",
+        )
+        self.assertNotIn(r.status_code, range(200, 300))
+
+    def test_patch_never_succeeds(self):
+        r = self.client.patch(
+            f"/api/v1/companies/public/{self.company.id}/",
+            {"company_name": "Hacked"},
+            format="json",
+        )
+        self.assertNotIn(r.status_code, range(200, 300))
+        self.company.refresh_from_db()
+        self.assertEqual(self.company.company_name, "Write Co")
+
+    def test_delete_never_succeeds(self):
+        r = self.client.delete(f"/api/v1/companies/public/{self.company.id}/")
+        self.assertNotIn(r.status_code, range(200, 300))
+        self.assertTrue(Company.objects.filter(id=self.company.id).exists())
+
+
+class PublicCompanyThrottleAttachmentTests(APITestCase):
+    """Setting throttle_classes replaces DRF's defaults, so the burst class
+    must be listed explicitly alongside anon/user to backstop anonymous
+    browse traffic on this endpoint (see jobApp/throttling.py)."""
+
+    def test_public_company_viewset_has_layered_throttles(self):
+        from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
+        from jobApp.throttling import BurstRateThrottle
+        from apps.companies.views import PublicCompanyViewSet
+
+        self.assertEqual(
+            PublicCompanyViewSet.throttle_classes,
+            [AnonRateThrottle, UserRateThrottle, BurstRateThrottle],
+        )
+
+
+class PublicCompanySearchAndFilterTests(APITestCase):
+    """Task 4: search over company_name/profile_description; business_stream filter."""
+
+    def setUp(self):
+        self.stream_a = BusinessStream.objects.create(business_stream_name="Search Stream A")
+        self.stream_b = BusinessStream.objects.create(business_stream_name="Search Stream B")
+
+        owner_a = UserAccount.objects.create_user(
+            email="pub-search-a@example.com", password="Str0ng-Password!", user_type="company"
+        )
+        self.co_a = owner_a.company_profile
+        self.co_a.company_name = "Halcyon Systems"
+        self.co_a.business_stream = self.stream_a
+        self.co_a.profile_description = "We build data platforms"
+        self.co_a.save()
+
+        owner_b = UserAccount.objects.create_user(
+            email="pub-search-b@example.com", password="Str0ng-Password!", user_type="company"
+        )
+        self.co_b = owner_b.company_profile
+        self.co_b.company_name = "Zenith Robotics"
+        self.co_b.business_stream = self.stream_b
+        self.co_b.profile_description = "We build hardware"
+        self.co_b.save()
+
+    def test_search_by_company_name_narrows(self):
+        r = self.client.get("/api/v1/companies/public/?search=Halcyon")
+        ids = {c["id"] for c in r.data["results"]}
+        self.assertIn(str(self.co_a.id), ids)
+        self.assertNotIn(str(self.co_b.id), ids)
+
+    def test_search_by_profile_description_narrows(self):
+        r = self.client.get("/api/v1/companies/public/?search=hardware")
+        ids = {c["id"] for c in r.data["results"]}
+        self.assertIn(str(self.co_b.id), ids)
+        self.assertNotIn(str(self.co_a.id), ids)
+
+    def test_filter_by_business_stream_narrows(self):
+        r = self.client.get(f"/api/v1/companies/public/?business_stream={self.stream_a.id}")
+        ids = {c["id"] for c in r.data["results"]}
+        self.assertIn(str(self.co_a.id), ids)
+        self.assertNotIn(str(self.co_b.id), ids)
+
+
+class PublicCompanyQueryCountTests(APITestCase):
+    """Task 4: list endpoint stays within the project's ≤10-query budget."""
+
+    def setUp(self):
+        stream = BusinessStream.objects.create(business_stream_name="QC Public")
+        job_type = JobType.objects.create(job_type_name="QC Public Type")
+        location = JobLocation.objects.create(city="Iloilo", country="PH")
+        for i in range(15):
+            owner = UserAccount.objects.create_user(
+                email=f"pub-qc{i}@example.com",
+                password="Str0ng-Password!",
+                user_type="company",
+            )
+            co = owner.company_profile
+            co.company_name = f"QC Public Co {i}"
+            co.business_stream = stream
+            co.save()
+            CompanyImages.objects.create(company=co, image_url="https://x.invalid/a.png")
+            JobPost.objects.create(
+                company=co,
+                job_type=job_type,
+                job_location=location,
+                job_title="QC Role",
+                job_description="...",
+                is_published=True,
+                is_active=True,
+            )
+
+    def test_public_company_list_query_count(self):
+        with CaptureQueriesContext(connection) as ctx:
+            r = self.client.get("/api/v1/companies/public/")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertLessEqual(
+            len(ctx),
+            COMPANY_QUERY_BUDGET,
+            f"Query count {len(ctx)} exceeds budget {COMPANY_QUERY_BUDGET}",
+        )

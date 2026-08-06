@@ -20,10 +20,17 @@ from .serializers import (
     JobTypeSerializer,
     JobLocationSerializer,
     JobPostSerializer,
+    JobPostReadSerializer,
     JobPostActivitySerializer,
     JobPostSkillSetSerializer,
 )
-from .permissions import IsAdminOrReadOnly, IsJobPosterOrAdmin, IsApplicantOrCompanyOrAdmin, CanManageJobSkills
+from .permissions import (
+    IsAdminOrReadOnly,
+    IsJobPosterOrAdmin,
+    IsApplicantOrCompanyOrAdmin,
+    CanManageJobLocations,
+    CanManageJobSkills,
+)
 
 
 _ApplyRequestSerializer = inline_serializer(
@@ -72,14 +79,16 @@ class JobLocationViewSet(viewsets.ModelViewSet):
     """
     API for job locations.
     - Everyone can view locations
-    - Authenticated users (companies) can create locations
-    - Admins can manage all locations
+    - Company users (or admins) can create locations
+    - Only admins can update or delete locations -- JobLocation has no
+      owner FK, so any company could otherwise edit/delete another
+      company's location
     """
 
     queryset = JobLocation.objects.all()
     serializer_class = JobLocationSerializer
     authentication_classes = [CustomJWTAuthentication]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [CanManageJobLocations]
 
 
 class JobPostViewSet(viewsets.ModelViewSet):
@@ -99,13 +108,24 @@ class JobPostViewSet(viewsets.ModelViewSet):
     throttle_classes = [AnonRateThrottle, UserRateThrottle, BurstRateThrottle]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_class = JobPostFilter
-    search_fields = ['job_title', 'job_description', 'company__company_name']
-    ordering_fields = ['created_at', 'salary_max', 'salary_min', 'deadline_date']
+    search_fields = [
+        'job_title',
+        'job_description',
+        'company__company_name',
+        'required_skills__skill_set__skill_name',
+    ]
+    ordering_fields = ['created_at', 'salary_max', 'salary_min', 'deadline_date', 'salary_rank']
     ordering = ['-created_at']
+
+    def get_serializer_class(self):
+        """Nested read shape for list/retrieve; UUID-in write contract otherwise."""
+        if self.action in ('list', 'retrieve'):
+            return JobPostReadSerializer
+        return JobPostSerializer
 
     def get_queryset(self):
         """Admins → all; company → their own (published + drafts); else → published."""
-        qs = JobPost.objects.with_related()
+        qs = JobPost.objects.with_related().with_salary_rank()
         user = self.request.user
         if user.is_staff or user.is_superuser:
             return qs
