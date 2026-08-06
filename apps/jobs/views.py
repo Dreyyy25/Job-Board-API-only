@@ -101,8 +101,13 @@ class JobPostViewSet(viewsets.ModelViewSet):
     throttle_classes = [AnonRateThrottle, UserRateThrottle, BurstRateThrottle]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
     filterset_class = JobPostFilter
-    search_fields = ['job_title', 'job_description', 'company__company_name']
-    ordering_fields = ['created_at', 'salary_max', 'salary_min', 'deadline_date']
+    search_fields = [
+        'job_title',
+        'job_description',
+        'company__company_name',
+        'required_skills__skill_set__skill_name',
+    ]
+    ordering_fields = ['created_at', 'salary_max', 'salary_min', 'deadline_date', 'salary_rank']
     ordering = ['-created_at']
 
     def get_serializer_class(self):
@@ -113,7 +118,7 @@ class JobPostViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         """Admins → all; company → their own (published + drafts); else → published."""
-        qs = JobPost.objects.with_related()
+        qs = JobPost.objects.with_related().with_salary_rank()
         user = self.request.user
         if user.is_staff or user.is_superuser:
             return qs

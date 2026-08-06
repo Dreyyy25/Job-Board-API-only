@@ -380,6 +380,191 @@ class JobPostFilterTests(APITestCase):
         self.assertEqual(titles[0], "Staff Engineer")
 
 
+class JobPostAdvancedFilterTests(APITestCase):
+    """Task 3: business_stream filter, salary_floor coalesce filter, salary_rank ordering."""
+
+    def setUp(self):
+        owner_a = UserAccount.objects.create_user(
+            email="adv-owner-a@example.com",
+            password="Str0ng-Password!",
+            user_type="company",
+        )
+        owner_b = UserAccount.objects.create_user(
+            email="adv-owner-b@example.com",
+            password="Str0ng-Password!",
+            user_type="company",
+        )
+        self.stream_a = BusinessStream.objects.create(business_stream_name="Adv Stream A")
+        self.stream_b = BusinessStream.objects.create(business_stream_name="Adv Stream B")
+        self.company_a = owner_a.company_profile
+        self.company_a.company_name = "AdvCoA"
+        self.company_a.business_stream = self.stream_a
+        self.company_a.save()
+        self.company_b = owner_b.company_profile
+        self.company_b.company_name = "AdvCoB"
+        self.company_b.business_stream = self.stream_b
+        self.company_b.save()
+        jt = JobType.objects.create(job_type_name="AdvFT")
+        loc = JobLocation.objects.create(city="AdvCity", country="PH")
+
+        self.job_stream_a = JobPost.objects.create(
+            company=self.company_a,
+            job_type=jt,
+            job_location=loc,
+            job_title="Stream A Job",
+            job_description="...",
+        )
+        self.job_stream_b = JobPost.objects.create(
+            company=self.company_b,
+            job_type=jt,
+            job_location=loc,
+            job_title="Stream B Job",
+            job_description="...",
+        )
+
+        self.job_max_only = JobPost.objects.create(
+            company=self.company_a,
+            job_type=jt,
+            job_location=loc,
+            job_title="Max Only Job",
+            job_description="...",
+            salary_min=90000,
+            salary_max=120000,
+        )
+        self.job_min_only = JobPost.objects.create(
+            company=self.company_a,
+            job_type=jt,
+            job_location=loc,
+            job_title="Min Only Job",
+            job_description="...",
+            salary_min=110000,
+            salary_max=None,
+        )
+        self.job_both_null = JobPost.objects.create(
+            company=self.company_a,
+            job_type=jt,
+            job_location=loc,
+            job_title="No Salary Job",
+            job_description="...",
+        )
+        self.job_below_floor = JobPost.objects.create(
+            company=self.company_a,
+            job_type=jt,
+            job_location=loc,
+            job_title="Below Floor Job",
+            job_description="...",
+            salary_min=40000,
+            salary_max=50000,
+        )
+
+    def _titles(self, response):
+        return sorted(j["job_title"] for j in response.data["results"])
+
+    def test_filter_by_business_stream(self):
+        r = self.client.get(f"/api/v1/jobs/job-posts/?business_stream={self.stream_a.id}")
+        titles = self._titles(r)
+        self.assertIn("Stream A Job", titles)
+        self.assertNotIn("Stream B Job", titles)
+
+    def test_salary_floor_matches_when_salary_max_meets_threshold(self):
+        r = self.client.get("/api/v1/jobs/job-posts/?salary_floor=100000")
+        self.assertIn("Max Only Job", self._titles(r))
+
+    def test_salary_floor_matches_when_salary_max_null_but_salary_min_meets_threshold(self):
+        r = self.client.get("/api/v1/jobs/job-posts/?salary_floor=100000")
+        self.assertIn("Min Only Job", self._titles(r))
+
+    def test_salary_floor_excludes_job_with_both_salaries_null(self):
+        r = self.client.get("/api/v1/jobs/job-posts/?salary_floor=100000")
+        self.assertNotIn("No Salary Job", self._titles(r))
+
+    def test_salary_floor_excludes_job_below_threshold(self):
+        r = self.client.get("/api/v1/jobs/job-posts/?salary_floor=100000")
+        self.assertNotIn("Below Floor Job", self._titles(r))
+
+    def test_ordering_by_salary_rank_desc_puts_salary_less_jobs_last(self):
+        r = self.client.get("/api/v1/jobs/job-posts/?ordering=-salary_rank")
+        titles = [j["job_title"] for j in r.data["results"]]
+        idx_no_salary = titles.index("No Salary Job")
+        idx_max_only = titles.index("Max Only Job")
+        idx_min_only = titles.index("Min Only Job")
+        idx_below_floor = titles.index("Below Floor Job")
+        # Salary-less job (rank 0) sorts after every job with a usable figure.
+        self.assertGreater(idx_no_salary, idx_max_only)
+        self.assertGreater(idx_no_salary, idx_min_only)
+        self.assertGreater(idx_no_salary, idx_below_floor)
+        # Among salaried jobs, highest COALESCE(salary_max, salary_min) first.
+        self.assertLess(idx_max_only, idx_min_only)
+        self.assertLess(idx_min_only, idx_below_floor)
+
+
+class JobPostSkillSearchTests(APITestCase):
+    """Task 3: search_fields includes required_skills__skill_set__skill_name."""
+
+    def setUp(self):
+        owner = UserAccount.objects.create_user(
+            email="skill-search-owner@example.com",
+            password="Str0ng-Password!",
+            user_type="company",
+        )
+        stream = BusinessStream.objects.create(business_stream_name="Skill Search Tech")
+        company = owner.company_profile
+        company.company_name = "SkillSearchCo"
+        company.business_stream = stream
+        company.save()
+        jt = JobType.objects.create(job_type_name="Skill Search FT")
+        loc = JobLocation.objects.create(city="SkillCity", country="PH")
+
+        self.job = JobPost.objects.create(
+            company=company,
+            job_type=jt,
+            job_location=loc,
+            job_title="Backend Role",
+            job_description="Build APIs",
+        )
+        self.python_skill = SkillSet.objects.create(skill_name="Python")
+        self.python_django_skill = SkillSet.objects.create(skill_name="Python Django")
+        JobPostSkillSet.objects.create(
+            job_post=self.job,
+            skill_set=self.python_skill,
+            skill_level="Advanced",
+            is_required=True,
+        )
+        JobPostSkillSet.objects.create(
+            job_post=self.job,
+            skill_set=self.python_django_skill,
+            skill_level="Intermediate",
+            is_required=True,
+        )
+
+        self.other_job = JobPost.objects.create(
+            company=company,
+            job_type=jt,
+            job_location=loc,
+            job_title="Unrelated Role",
+            job_description="General duties",
+        )
+        ruby_skill = SkillSet.objects.create(skill_name="Ruby")
+        JobPostSkillSet.objects.create(
+            job_post=self.other_job,
+            skill_set=ruby_skill,
+            skill_level="Beginner",
+            is_required=True,
+        )
+
+    def test_search_by_skill_name_finds_job(self):
+        r = self.client.get("/api/v1/jobs/job-posts/?search=Python")
+        titles = [j["job_title"] for j in r.data["results"]]
+        self.assertIn("Backend Role", titles)
+        self.assertNotIn("Unrelated Role", titles)
+
+    def test_search_by_skill_name_returns_job_with_two_matches_once(self):
+        r = self.client.get("/api/v1/jobs/job-posts/?search=Python")
+        matches = [j for j in r.data["results"] if j["job_title"] == "Backend Role"]
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(r.data["count"], 1)
+
+
 QUERY_BUDGET = 10  # ceiling; tune downward as prefetches are added
 
 
