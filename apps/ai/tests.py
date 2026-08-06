@@ -1875,6 +1875,33 @@ class CheckpointerSetupCommandTests(TestCase):
         fake.return_value.setup.assert_called_once_with()
         self.assertIn("checkpointer tables ready", out.getvalue().lower())
 
+    def test_command_closes_the_pool_before_exiting(self):
+        """The command runs in a short-lived process: leaving the pool open
+        costs ~20s of psycopg_pool thread-teardown timeouts on every container
+        boot. reset_checkpointer() is the close path — it must run."""
+        from io import StringIO
+        from django.core.management import call_command
+
+        target = "apps.ai.management.commands.ai_checkpointer_setup.get_checkpointer"
+        reset_target = "apps.ai.management.commands.ai_checkpointer_setup.reset_checkpointer"
+        with patch(target), patch(reset_target) as fake_reset:
+            call_command("ai_checkpointer_setup", stdout=StringIO())
+        fake_reset.assert_called_once_with()
+
+    def test_command_closes_the_pool_even_when_setup_fails(self):
+        """A failed setup() must still tear the pool down — otherwise the
+        process exit appends 20s of thread-timeout noise after the traceback."""
+        from io import StringIO
+        from django.core.management import call_command
+
+        target = "apps.ai.management.commands.ai_checkpointer_setup.get_checkpointer"
+        reset_target = "apps.ai.management.commands.ai_checkpointer_setup.reset_checkpointer"
+        with patch(target) as fake, patch(reset_target) as fake_reset:
+            fake.return_value.setup.side_effect = RuntimeError("setup exploded")
+            with self.assertRaises(RuntimeError):
+                call_command("ai_checkpointer_setup", stdout=StringIO())
+        fake_reset.assert_called_once_with()
+
 
 class _ChatToolFixture:
     """A seeker, a company, published jobs, plus unpublished and inactive ones."""

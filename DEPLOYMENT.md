@@ -77,11 +77,10 @@ are interchangeable. Free-tier realities:
   Use your Postgres provider's **external** connection hostname here — the
   internal hostname the web service uses does not resolve from outside the
   platform.
-- Two log lines on every boot are expected and benign: psycopg pool
-  "couldn't stop thread" warnings while `ai_checkpointer_setup` exits, and
-  one gunicorn `Permission denied: '/app/.gunicorn'` control-socket error
-  (the app directory is deliberately read-only to the runtime user). Neither
-  affects request handling.
+- One log line on every boot is expected and benign: a gunicorn
+  `Permission denied: '/app/.gunicorn'` control-socket error — the app
+  directory is deliberately read-only to the runtime user. It does not
+  affect request handling.
 
 ## 6. Verifying a deploy
 
