@@ -63,6 +63,73 @@ class JobPostSkillSetReadSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class JobLocationRefSerializer(serializers.ModelSerializer):
+    """City/country only — the application screens need no more."""
+
+    class Meta:
+        model = JobLocation
+        fields = ['city', 'country']
+        read_only_fields = fields
+
+
+class ApplicationCompanyRefSerializer(serializers.ModelSerializer):
+    """Minimal company shape nested inside an application's job_post summary.
+
+    Deliberately leaner than `CompanyRefSerializer` (no `business_stream`):
+    the application list screens only need id/company_name, and dropping it
+    avoids an extra select_related hop with no read consumer.
+    """
+
+    class Meta:
+        model = Company
+        fields = ['id', 'company_name']
+        read_only_fields = fields
+
+
+class ApplicationJobPostSerializer(serializers.ModelSerializer):
+    """Lean job summary embedded in application reads. Embedding (rather than a
+    client-side join) is what lets a seeker keep seeing details of a job that
+    was unpublished after they applied."""
+
+    company = ApplicationCompanyRefSerializer(read_only=True)
+    job_type = JobTypeRefSerializer(read_only=True)
+    job_location = JobLocationRefSerializer(read_only=True)
+
+    class Meta:
+        model = JobPost
+        fields = [
+            'id',
+            'job_title',
+            'company',
+            'job_type',
+            'job_location',
+            'salary_min',
+            'salary_max',
+            'salary_type',
+            'deadline_date',
+            'is_published',
+            'is_active',
+        ]
+        read_only_fields = fields
+
+
+class JobPostActivityReadSerializer(serializers.ModelSerializer):
+    job_post = ApplicationJobPostSerializer(read_only=True)
+
+    class Meta:
+        model = JobPostActivity
+        fields = [
+            'id',
+            'user_account',
+            'job_post',
+            'application_date',
+            'application_status',
+            'cover_letter',
+            'updated_at',
+        ]
+        read_only_fields = fields
+
+
 def _job_post_is_owner(context, instance):
     request = context.get('request')
     user = getattr(request, 'user', None)
@@ -176,6 +243,54 @@ class JobPostActivitySerializer(serializers.ModelSerializer):
             'updated_at',
         ]
         read_only_fields = ['id', 'application_date', 'updated_at']
+
+
+_STATUS_TRANSITIONS = {
+    # actor role -> {current status -> allowed next statuses}
+    'seeker': {'pending': {'withdrawn'}, 'reviewed': {'withdrawn'}},
+    'company': {'pending': {'reviewed', 'accepted', 'rejected'}, 'reviewed': {'accepted', 'rejected'}},
+}
+
+
+class JobPostActivityUpdateSerializer(serializers.ModelSerializer):
+    """Only application_status is writable, and only along the allowed
+    transitions for the caller's role. Everything else about an application
+    is immutable after /jobs/apply/ creates it."""
+
+    class Meta:
+        model = JobPostActivity
+        fields = [
+            'id',
+            'user_account',
+            'job_post',
+            'application_date',
+            'application_status',
+            'cover_letter',
+            'updated_at',
+        ]
+        read_only_fields = [
+            'id',
+            'user_account',
+            'job_post',
+            'application_date',
+            'cover_letter',
+            'updated_at',
+        ]
+
+    def validate_application_status(self, value):
+        user = self.context['request'].user
+        current = self.instance.application_status
+        if value == current or user.is_staff or user.is_superuser:
+            return value
+        if user.id == self.instance.user_account_id:
+            allowed = _STATUS_TRANSITIONS['seeker'].get(current, set())
+        elif self.instance.job_post.company.user_account_id == user.id:
+            allowed = _STATUS_TRANSITIONS['company'].get(current, set())
+        else:
+            allowed = set()  # unreachable via queryset narrowing; defense in depth
+        if value not in allowed:
+            raise serializers.ValidationError(f"Cannot change status from '{current}' to '{value}'.")
+        return value
 
 
 class JobPostSkillSetSerializer(serializers.ModelSerializer):

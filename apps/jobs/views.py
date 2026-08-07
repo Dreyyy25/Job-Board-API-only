@@ -22,6 +22,8 @@ from .serializers import (
     JobPostSerializer,
     JobPostReadSerializer,
     JobPostActivitySerializer,
+    JobPostActivityReadSerializer,
+    JobPostActivityUpdateSerializer,
     JobPostSkillSetSerializer,
 )
 from .permissions import (
@@ -167,6 +169,13 @@ class JobPostActivityViewSet(viewsets.ModelViewSet):
     serializer_class = JobPostActivitySerializer
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [IsApplicantOrCompanyOrAdmin]
+    # Applications are created only through the validated /jobs/apply/ flow.
+    http_method_names = ['get', 'put', 'patch', 'delete', 'head', 'options']
+
+    def get_serializer_class(self):
+        if self.action in ('list', 'retrieve'):
+            return JobPostActivityReadSerializer
+        return JobPostActivityUpdateSerializer
 
     def get_queryset(self):
         """Admins → all; seekers → own; company → applications to their jobs; else → none."""
@@ -246,7 +255,7 @@ def apply_for_job(request):
 
 @extend_schema(
     responses={
-        200: JobPostActivitySerializer(many=True),
+        200: JobPostActivityReadSerializer(many=True),
         403: _JobsErrorSerializer,
         404: _JobsErrorSerializer,
     },
@@ -262,12 +271,12 @@ def job_applications(request, job_id):
         return Response({'error': 'Job not found'}, status=status.HTTP_404_NOT_FOUND)
     except services.DashboardPermissionError as e:
         return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
-    return Response(JobPostActivitySerializer(apps_qs, many=True).data)
+    return Response(JobPostActivityReadSerializer(apps_qs, many=True).data)
 
 
 @extend_schema(
     responses={
-        200: JobPostActivitySerializer(many=True),
+        200: JobPostActivityReadSerializer(many=True),
         403: _JobsErrorSerializer,
     },
     tags=['jobs'],
@@ -280,4 +289,4 @@ def user_applications(request, user_id):
         apps_qs = services.applications_for_user(request.user, user_id)
     except services.DashboardPermissionError as e:
         return Response({'error': str(e)}, status=status.HTTP_403_FORBIDDEN)
-    return Response(JobPostActivitySerializer(apps_qs, many=True).data)
+    return Response(JobPostActivityReadSerializer(apps_qs, many=True).data)

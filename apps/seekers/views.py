@@ -16,6 +16,7 @@ from .serializers import (
     ExperienceDataSerializer,
     SkillSetSerializer,
     SeekerSkillSetSerializer,
+    SeekerSkillSetReadSerializer,
 )
 from .permissions import IsSeekerOwnerOrAdmin, IsAdminOrReadOnly, CanManageSeekerSkills
 
@@ -26,7 +27,7 @@ _SeekerDashboardSerializer = inline_serializer(
         'profile': SeekerProfileSerializer(),
         'education': EducationDataSerializer(many=True),
         'experience': ExperienceDataSerializer(many=True),
-        'skills': SeekerSkillSetSerializer(many=True),
+        'skills': SeekerSkillSetReadSerializer(many=True),
     },
 )
 
@@ -155,6 +156,12 @@ class SeekerSkillSetViewSet(viewsets.ModelViewSet):
     serializer_class = SeekerSkillSetSerializer
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [CanManageSeekerSkills]
+
+    def get_serializer_class(self):
+        """Nested read shape for list/retrieve; plain write shape otherwise."""
+        if self.action in ('list', 'retrieve'):
+            return SeekerSkillSetReadSerializer
+        return SeekerSkillSetSerializer
 
     def get_queryset(self):
         """Admins/companies → all; seekers → own; else → none."""
