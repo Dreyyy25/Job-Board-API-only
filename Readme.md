@@ -2,13 +2,9 @@
 
 [![CI](https://github.com/Dreyyy25/Job-Board-API-only/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Dreyyy25/Job-Board-API-only/actions/workflows/ci.yml)
 
-A production-deployed REST API for a job board platform: companies post jobs, seekers search and apply, and a Gemini-powered AI suite assists both sides — drafting job posts, importing resumes, screening applicants, and answering seekers through a guarded chat assistant.
+A production-ready REST API for a job board platform: companies post jobs, seekers search and apply, and a Gemini-powered AI suite assists both sides — drafting job posts, importing resumes, screening applicants, and answering seekers through a guarded chat assistant.
 
-**Live instance** (free tier — the first request after idle can take up to a minute while the instance wakes and re-runs migrations):
-
-- Swagger UI: https://jobboard-api-mcoa.onrender.com/api/docs/
-- ReDoc: https://jobboard-api-mcoa.onrender.com/api/redoc/
-- Health: https://jobboard-api-mcoa.onrender.com/healthz
+Interactive API docs (Swagger UI at `/api/docs/`, ReDoc at `/api/redoc/`) ship with the app — run it locally with the quick start below and explore every endpoint in the browser.
 
 ## Features
 
@@ -112,7 +108,7 @@ The entrypoint applies migrations and creates the chat-checkpointer tables on ev
 
 ## Deployment
 
-[DEPLOYMENT.md](DEPLOYMENT.md) is the runbook: build and push the image to a registry, run it on Render (or any container host) with the documented environment variables, point the platform's health check at `/healthz`, and bring your own Postgres — the live instance runs on Render's free tier with a Neon Postgres.
+[DEPLOYMENT.md](DEPLOYMENT.md) is the runbook: build and push the image to a registry, run it on Render (or any container host) with the documented environment variables, point the platform's health check at `/healthz`, and bring your own Postgres (any 14+ provider works — the config takes five discrete `DB_*` values).
 
 ## API conventions
 
