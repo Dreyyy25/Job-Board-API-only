@@ -91,11 +91,15 @@ class MePatchTests(APITestCase):
 
 class ChangePasswordTests(APITestCase):
     def setUp(self):
+        cache.clear()
         self.user = UserAccount.objects.create_user(
             email='pw@example.com', password='Old-Password-123!', user_type='job_seeker'
         )
         refresh = RefreshToken.for_user(self.user)
         self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {refresh.access_token}')
+
+    def tearDown(self):
+        cache.clear()
 
     def _post(self, body):
         return self.client.post('/api/v1/accounts/change-password/', body, format='json')
@@ -121,6 +125,13 @@ class ChangePasswordTests(APITestCase):
     def test_anonymous_401(self):
         self.client.credentials()
         self.assertEqual(self._post({}).status_code, 401)
+
+    def test_throttles_after_limit(self):
+        for i in range(10):
+            r = self._post({'current_password': 'nope', 'new_password': 'New-Password-456!'})
+            self.assertEqual(r.status_code, 400)
+        r11 = self._post({'current_password': 'nope', 'new_password': 'New-Password-456!'})
+        self.assertEqual(r11.status_code, 429)
 
     def test_me_patch_password_now_rejected(self):
         r = self.client.patch('/api/v1/accounts/me/', {'password': 'Another-Pass-789!'}, format='json')
