@@ -4,8 +4,8 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
 from apps.accounts.models import UserAccount
-from apps.companies.models import BusinessStream
-from apps.jobs.models import JobType, JobLocation, JobPost, JobPostSkillSet
+from apps.companies.models import BusinessStream, Company
+from apps.jobs.models import JobType, JobLocation, JobPost, JobPostActivity, JobPostSkillSet
 from apps.seekers.models import SkillSet
 
 
@@ -895,3 +895,173 @@ class JobPostQueryCountTests(APITestCase):
         self.assertIsInstance(sample["job_type"], dict)
         self.assertIsInstance(sample["job_location"], dict)
         self.assertIn("required_skills", sample)
+
+
+class ApplicationNestedReadTests(APITestCase):
+    """List/retrieve applications return a nested job_post summary; write shape unchanged."""
+
+    def setUp(self):
+        self.seeker = UserAccount.objects.create_user(
+            email='nested-seeker@example.com', password='Str0ng-Password!', user_type='job_seeker'
+        )
+        self.company_user = UserAccount.objects.create_user(
+            email='nested-co@example.com', password='Str0ng-Password!', user_type='company'
+        )
+        company = Company.objects.get(user_account=self.company_user)
+        company.company_name = 'Nested Co'
+        company.save()
+        jt = JobType.objects.create(job_type_name='Full-time')
+        loc = JobLocation.objects.create(city='Berlin', country='Germany')
+        self.job = JobPost.objects.create(
+            company=company,
+            job_type=jt,
+            job_location=loc,
+            job_title='ML Engineer',
+            job_description='d',
+            salary_min=90000,
+            salary_max=120000,
+            salary_type='yearly',
+        )
+        self.app = JobPostActivity.objects.create(user_account=self.seeker, job_post=self.job)
+        self.expected_job_post = {
+            'id': str(self.job.id),
+            'job_title': 'ML Engineer',
+            'company': {'id': str(self.job.company_id), 'company_name': 'Nested Co'},
+            'job_type': {'id': str(self.job.job_type_id), 'job_type_name': 'Full-time'},
+            'job_location': {'city': 'Berlin', 'country': 'Germany'},
+            'salary_min': '90000.00',
+            'salary_max': '120000.00',
+            'salary_type': 'yearly',
+            'deadline_date': None,
+            'is_published': True,
+            'is_active': True,
+        }
+        refresh = RefreshToken.for_user(self.seeker)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {refresh.access_token}')
+
+    def test_list_returns_nested_job_post_summary(self):
+        r = self.client.get('/api/v1/jobs/job-applications/')
+        self.assertEqual(r.status_code, 200)
+        row = r.data['results'][0]
+        self.assertEqual(row['job_post'], self.expected_job_post)
+
+    def test_unpublished_job_still_nested_for_the_applicant(self):
+        self.job.is_published = False
+        self.job.save()
+        r = self.client.get(f'/api/v1/jobs/job-applications/{self.app.id}/')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data['job_post']['job_title'], 'ML Engineer')
+        self.assertFalse(r.data['job_post']['is_published'])
+
+    def test_user_applications_view_is_nested_too(self):
+        r = self.client.get(f'/api/v1/jobs/applications/user/{self.seeker.id}/')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data[0]['job_post']['company']['company_name'], 'Nested Co')
+
+    def test_company_view_returns_nested_job_post_summary(self):
+        refresh = RefreshToken.for_user(self.company_user)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {refresh.access_token}')
+        r = self.client.get(f'/api/v1/jobs/applications/job/{self.job.id}/')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.data[0]['job_post']['company']['company_name'], 'Nested Co')
+        self.assertEqual(r.data[0]['job_post'], self.expected_job_post)
+
+    def test_list_query_count_is_flat(self):
+        for i in range(10):
+            u = UserAccount.objects.create_user(
+                email=f'ns{i}@example.com', password='Str0ng-Password!', user_type='job_seeker'
+            )
+            JobPostActivity.objects.create(user_account=u, job_post=self.job)
+        staff = UserAccount.objects.create_user(
+            email='ns-admin@example.com', password='Str0ng-Password!', user_type='job_seeker'
+        )
+        staff.is_staff = True
+        staff.save()
+        refresh = RefreshToken.for_user(staff)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {refresh.access_token}')
+        with self.assertNumQueries(3):  # count + page + auth user lookup
+            self.client.get('/api/v1/jobs/job-applications/?page_size=50')
+
+
+class ApplicationLockdownTests(APITestCase):
+    def setUp(self):
+        self.seeker = UserAccount.objects.create_user(
+            email='lock-seeker@example.com', password='Str0ng-Password!', user_type='job_seeker'
+        )
+        self.other_seeker = UserAccount.objects.create_user(
+            email='lock-other@example.com', password='Str0ng-Password!', user_type='job_seeker'
+        )
+        self.company_user = UserAccount.objects.create_user(
+            email='lock-co@example.com', password='Str0ng-Password!', user_type='company'
+        )
+        company = Company.objects.get(user_account=self.company_user)
+        jt = JobType.objects.create(job_type_name='Full-time')
+        loc = JobLocation.objects.create(city='X', country='Y')
+        self.job = JobPost.objects.create(
+            company=company, job_type=jt, job_location=loc, job_title='T', job_description='d'
+        )
+        self.app = JobPostActivity.objects.create(user_account=self.seeker, job_post=self.job)
+
+    def _as(self, user):
+        refresh = RefreshToken.for_user(user)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {refresh.access_token}')
+
+    def _patch(self, status_value):
+        return self.client.patch(
+            f'/api/v1/jobs/job-applications/{self.app.id}/', {'application_status': status_value}, format='json'
+        )
+
+    def test_viewset_post_is_gone(self):
+        self._as(self.other_seeker)
+        r = self.client.post(
+            '/api/v1/jobs/job-applications/',
+            {'user_account': str(self.seeker.id), 'job_post': str(self.job.id), 'application_status': 'accepted'},
+            format='json',
+        )
+        self.assertEqual(r.status_code, 405)
+
+    def test_update_cannot_move_the_application(self):
+        self._as(self.seeker)
+        r = self.client.patch(
+            f'/api/v1/jobs/job-applications/{self.app.id}/',
+            {'user_account': str(self.other_seeker.id), 'cover_letter': 'new', 'application_status': 'withdrawn'},
+            format='json',
+        )
+        self.assertEqual(r.status_code, 200)
+        self.app.refresh_from_db()
+        self.assertEqual(self.app.user_account_id, self.seeker.id)  # read-only ignored
+        self.assertEqual(self.app.cover_letter, '')
+        self.assertEqual(self.app.application_status, 'withdrawn')
+
+    def test_seeker_transitions(self):
+        self._as(self.seeker)
+        self.assertEqual(self._patch('accepted').status_code, 400)  # self-accept blocked
+        self.assertEqual(self._patch('withdrawn').status_code, 200)  # pending -> withdrawn OK
+        self.assertEqual(self._patch('pending').status_code, 400)  # un-withdraw blocked
+
+    def test_seeker_can_withdraw_from_reviewed(self):
+        self.app.application_status = 'reviewed'
+        self.app.save()
+        self._as(self.seeker)
+        self.assertEqual(self._patch('withdrawn').status_code, 200)
+
+    def test_company_transitions(self):
+        self._as(self.company_user)
+        self.assertEqual(self._patch('withdrawn').status_code, 400)  # company can't withdraw
+        self.assertEqual(self._patch('reviewed').status_code, 200)  # pending -> reviewed
+        self.assertEqual(self._patch('pending').status_code, 400)  # no going back
+        self.assertEqual(self._patch('accepted').status_code, 200)  # reviewed -> accepted
+
+    def test_same_value_is_a_noop_200(self):
+        self._as(self.seeker)
+        self.assertEqual(self._patch('pending').status_code, 200)
+
+    def test_admin_unrestricted(self):
+        admin = UserAccount.objects.create_user(
+            email='lock-admin@example.com', password='Str0ng-Password!', user_type='job_seeker'
+        )
+        admin.is_staff = True
+        admin.save()
+        self._as(admin)
+        self.assertEqual(self._patch('accepted').status_code, 200)
+        self.assertEqual(self._patch('pending').status_code, 200)

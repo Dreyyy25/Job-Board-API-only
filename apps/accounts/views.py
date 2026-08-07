@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.contrib.auth.hashers import make_password
+from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import (
     ObjectDoesNotExist,
     ValidationError as DjangoValidationError,
@@ -125,12 +126,9 @@ class UserAccountViewSet(viewsets.ModelViewSet):
             serializer.save()
 
     def perform_update(self, serializer):
-        """Override update to hash password if provided"""
-        password = serializer.validated_data.get('password')
-        if password:
-            serializer.save(password=make_password(password))
-        else:
-            serializer.save()
+        """password is create-only; UserAccountSerializer.validate() rejects
+        it on update, so there is nothing left to hash here."""
+        serializer.save()
 
 
 # Registration endpoint
@@ -286,14 +284,47 @@ def me(request):
         serializer = UserAccountSerializer(user, data=request.data, partial=partial)
 
         if serializer.is_valid():
-            # Hash password if provided
-            password = serializer.validated_data.get('password')
-            if password:
-                serializer.save(password=make_password(password))
-            else:
-                serializer.save()
+            serializer.save()
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+# Change-password endpoint
+@extend_schema(
+    request=inline_serializer(
+        name='ChangePasswordRequest',
+        fields={
+            'current_password': drf_serializers.CharField(),
+            'new_password': drf_serializers.CharField(),
+        },
+    ),
+    responses={
+        204: OpenApiResponse(description='Password changed'),
+        400: OpenApiResponse(description='Validation error'),
+    },
+    tags=['accounts'],
+)
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+@throttle_classes([LoginThrottle])
+@parser_classes([JSONParser])
+def change_password(request):
+    """Verify the current password, then set the new one (JSON bodies only).
+
+    Mirrors login/register's JSON-only + LoginThrottle wiring for
+    consistency across the accounts auth endpoints.
+    """
+    current = request.data.get('current_password') or ''
+    new = request.data.get('new_password') or ''
+    if not request.user.check_password(current):
+        return Response({'current_password': ['Incorrect password.']}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        validate_password(new, user=request.user)
+    except DjangoValidationError as e:
+        return Response({'new_password': list(e.messages)}, status=status.HTTP_400_BAD_REQUEST)
+    request.user.password = make_password(new)
+    request.user.save(update_fields=['password'])
+    return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 # Logout endpoint
