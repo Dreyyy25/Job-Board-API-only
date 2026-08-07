@@ -98,9 +98,17 @@ class ApplicationJobPostSerializer(serializers.ModelSerializer):
     class Meta:
         model = JobPost
         fields = [
-            'id', 'job_title', 'company', 'job_type', 'job_location',
-            'salary_min', 'salary_max', 'salary_type', 'deadline_date',
-            'is_published', 'is_active',
+            'id',
+            'job_title',
+            'company',
+            'job_type',
+            'job_location',
+            'salary_min',
+            'salary_max',
+            'salary_type',
+            'deadline_date',
+            'is_published',
+            'is_active',
         ]
         read_only_fields = fields
 
@@ -111,8 +119,13 @@ class JobPostActivityReadSerializer(serializers.ModelSerializer):
     class Meta:
         model = JobPostActivity
         fields = [
-            'id', 'user_account', 'job_post', 'application_date',
-            'application_status', 'cover_letter', 'updated_at',
+            'id',
+            'user_account',
+            'job_post',
+            'application_date',
+            'application_status',
+            'cover_letter',
+            'updated_at',
         ]
         read_only_fields = fields
 
@@ -235,8 +248,7 @@ class JobPostActivitySerializer(serializers.ModelSerializer):
 _STATUS_TRANSITIONS = {
     # actor role -> {current status -> allowed next statuses}
     'seeker': {'pending': {'withdrawn'}, 'reviewed': {'withdrawn'}},
-    'company': {'pending': {'reviewed', 'accepted', 'rejected'},
-                'reviewed': {'accepted', 'rejected'}},
+    'company': {'pending': {'reviewed', 'accepted', 'rejected'}, 'reviewed': {'accepted', 'rejected'}},
 }
 
 
@@ -248,12 +260,21 @@ class JobPostActivityUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = JobPostActivity
         fields = [
-            'id', 'user_account', 'job_post', 'application_date',
-            'application_status', 'cover_letter', 'updated_at',
+            'id',
+            'user_account',
+            'job_post',
+            'application_date',
+            'application_status',
+            'cover_letter',
+            'updated_at',
         ]
         read_only_fields = [
-            'id', 'user_account', 'job_post', 'application_date',
-            'cover_letter', 'updated_at',
+            'id',
+            'user_account',
+            'job_post',
+            'application_date',
+            'cover_letter',
+            'updated_at',
         ]
 
     def validate_application_status(self, value):
@@ -268,8 +289,7 @@ class JobPostActivityUpdateSerializer(serializers.ModelSerializer):
         else:
             allowed = set()  # unreachable via queryset narrowing; defense in depth
         if value not in allowed:
-            raise serializers.ValidationError(
-                f"Cannot change status from '{current}' to '{value}'.")
+            raise serializers.ValidationError(f"Cannot change status from '{current}' to '{value}'.")
         return value
 
 

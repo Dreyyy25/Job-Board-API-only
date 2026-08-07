@@ -94,8 +94,7 @@ class SeekerSkillSetSerializer(serializers.ModelSerializer):
     free-text skill_name (get-or-create, case-insensitive — the master list
     grows organically). Updates may change skill_level only."""
 
-    skill_name = serializers.CharField(
-        write_only=True, required=False, max_length=100, allow_blank=False)
+    skill_name = serializers.CharField(write_only=True, required=False, max_length=100, allow_blank=False)
 
     class Meta:
         model = SeekerSkillSet
@@ -107,13 +106,13 @@ class SeekerSkillSetSerializer(serializers.ModelSerializer):
         if self.instance is not None:  # update: level only
             if 'skill_set' in attrs or 'skill_name' in attrs:
                 raise serializers.ValidationError(
-                    {'skill_set': ['Cannot change the skill; delete and re-add instead.']})
+                    {'skill_set': ['Cannot change the skill; delete and re-add instead.']}
+                )
             return attrs
 
         name = (attrs.pop('skill_name', '') or '').strip()
         if not attrs.get('skill_set') and not name:
-            raise serializers.ValidationError(
-                {'skill_set': ['Provide skill_set or skill_name.']})
+            raise serializers.ValidationError({'skill_set': ['Provide skill_set or skill_name.']})
         if name and not attrs.get('skill_set'):
             existing = SkillSet.objects.filter(skill_name__iexact=name).first()
             attrs['skill_set'] = existing or SkillSet.objects.create(skill_name=name)
@@ -122,10 +121,8 @@ class SeekerSkillSetSerializer(serializers.ModelSerializer):
         # UniqueTogetherValidator — enforce it here so a duplicate attach is a
         # clean 400 instead of a DB IntegrityError 500.
         user = self.context['request'].user
-        if SeekerSkillSet.objects.filter(
-                user_account=user, skill_set=attrs['skill_set']).exists():
-            raise serializers.ValidationError(
-                {'skill_set': ['You already added this skill.']})
+        if SeekerSkillSet.objects.filter(user_account=user, skill_set=attrs['skill_set']).exists():
+            raise serializers.ValidationError({'skill_set': ['You already added this skill.']})
         return attrs
 
 

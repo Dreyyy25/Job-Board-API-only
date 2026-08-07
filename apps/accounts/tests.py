@@ -92,7 +92,8 @@ class MePatchTests(APITestCase):
 class ChangePasswordTests(APITestCase):
     def setUp(self):
         self.user = UserAccount.objects.create_user(
-            email='pw@example.com', password='Old-Password-123!', user_type='job_seeker')
+            email='pw@example.com', password='Old-Password-123!', user_type='job_seeker'
+        )
         refresh = RefreshToken.for_user(self.user)
         self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {refresh.access_token}')
 

@@ -291,12 +291,17 @@ def me(request):
 
 # Change-password endpoint
 @extend_schema(
-    request=inline_serializer(name='ChangePasswordRequest', fields={
-        'current_password': drf_serializers.CharField(),
-        'new_password': drf_serializers.CharField(),
-    }),
-    responses={204: OpenApiResponse(description='Password changed'),
-               400: OpenApiResponse(description='Validation error')},
+    request=inline_serializer(
+        name='ChangePasswordRequest',
+        fields={
+            'current_password': drf_serializers.CharField(),
+            'new_password': drf_serializers.CharField(),
+        },
+    ),
+    responses={
+        204: OpenApiResponse(description='Password changed'),
+        400: OpenApiResponse(description='Validation error'),
+    },
     tags=['accounts'],
 )
 @api_view(['POST'])
@@ -312,13 +317,11 @@ def change_password(request):
     current = request.data.get('current_password') or ''
     new = request.data.get('new_password') or ''
     if not request.user.check_password(current):
-        return Response({'current_password': ['Incorrect password.']},
-                        status=status.HTTP_400_BAD_REQUEST)
+        return Response({'current_password': ['Incorrect password.']}, status=status.HTTP_400_BAD_REQUEST)
     try:
         validate_password(new, user=request.user)
     except DjangoValidationError as e:
-        return Response({'new_password': list(e.messages)},
-                        status=status.HTTP_400_BAD_REQUEST)
+        return Response({'new_password': list(e.messages)}, status=status.HTTP_400_BAD_REQUEST)
     request.user.password = make_password(new)
     request.user.save(update_fields=['password'])
     return Response(status=status.HTTP_204_NO_CONTENT)

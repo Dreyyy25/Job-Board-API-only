@@ -56,8 +56,7 @@ class UserAccountSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         if self.instance is not None and 'password' in self.initial_data:
-            raise serializers.ValidationError(
-                {'password': ['Use /accounts/change-password/ to change your password.']})
+            raise serializers.ValidationError({'password': ['Use /accounts/change-password/ to change your password.']})
         return attrs
 
     def create(self, validated_data):

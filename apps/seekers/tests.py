@@ -159,10 +159,10 @@ class SeekerProfileCreateConflictTests(APITestCase):
 class SeekerSkillNestedReadTests(APITestCase):
     def setUp(self):
         self.seeker = UserAccount.objects.create_user(
-            email='skill-seeker@example.com', password='Str0ng-Password!', user_type='job_seeker')
+            email='skill-seeker@example.com', password='Str0ng-Password!', user_type='job_seeker'
+        )
         self.skill = SkillSet.objects.create(skill_name='Python')
-        self.row = SeekerSkillSet.objects.create(
-            user_account=self.seeker, skill_set=self.skill, skill_level='Advanced')
+        self.row = SeekerSkillSet.objects.create(user_account=self.seeker, skill_set=self.skill, skill_level='Advanced')
         refresh = RefreshToken.for_user(self.seeker)
         self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {refresh.access_token}')
 
@@ -172,19 +172,22 @@ class SeekerSkillNestedReadTests(APITestCase):
         key (including ones a regression might silently drop) is pinned."""
         created_at = row['skill_set'].pop('created_at')
         self.assertIsNotNone(created_at)
-        self.assertEqual(row, {
-            'id': str(self.row.id),
-            # FK fields render as the raw related-object pk (a UUID instance) at
-            # the pre-JSON-render `response.data` stage DRF's test client exposes
-            # -- only direct model UUIDField values (like `id` above) go through
-            # UUIDField.to_representation() and come out as str.
-            'user_account': self.seeker.id,
-            'skill_set': {
-                'id': str(self.skill.id),
-                'skill_name': 'Python',
+        self.assertEqual(
+            row,
+            {
+                'id': str(self.row.id),
+                # FK fields render as the raw related-object pk (a UUID instance) at
+                # the pre-JSON-render `response.data` stage DRF's test client exposes
+                # -- only direct model UUIDField values (like `id` above) go through
+                # UUIDField.to_representation() and come out as str.
+                'user_account': self.seeker.id,
+                'skill_set': {
+                    'id': str(self.skill.id),
+                    'skill_name': 'Python',
+                },
+                'skill_level': 'Advanced',
             },
-            'skill_level': 'Advanced',
-        })
+        )
 
     def test_list_nests_skill_name(self):
         r = self.client.get('/api/v1/seekers/seeker-skills/')
@@ -200,7 +203,8 @@ class SeekerSkillNestedReadTests(APITestCase):
 class SeekerSkillCreateByNameTests(APITestCase):
     def setUp(self):
         self.seeker = UserAccount.objects.create_user(
-            email='sbn@example.com', password='Str0ng-Password!', user_type='job_seeker')
+            email='sbn@example.com', password='Str0ng-Password!', user_type='job_seeker'
+        )
         refresh = RefreshToken.for_user(self.seeker)
         self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {refresh.access_token}')
 
@@ -232,14 +236,11 @@ class SeekerSkillCreateByNameTests(APITestCase):
 
     def test_patch_level_only(self):
         skill = SkillSet.objects.create(skill_name='Go')
-        row = SeekerSkillSet.objects.create(
-            user_account=self.seeker, skill_set=skill, skill_level='Beginner')
+        row = SeekerSkillSet.objects.create(user_account=self.seeker, skill_set=skill, skill_level='Beginner')
         other = SkillSet.objects.create(skill_name='Rust')
-        r = self.client.patch(f'/api/v1/seekers/seeker-skills/{row.id}/',
-                              {'skill_set': str(other.id)}, format='json')
+        r = self.client.patch(f'/api/v1/seekers/seeker-skills/{row.id}/', {'skill_set': str(other.id)}, format='json')
         self.assertEqual(r.status_code, 400)
-        r = self.client.patch(f'/api/v1/seekers/seeker-skills/{row.id}/',
-                              {'skill_level': 'Advanced'}, format='json')
+        r = self.client.patch(f'/api/v1/seekers/seeker-skills/{row.id}/', {'skill_level': 'Advanced'}, format='json')
         self.assertEqual(r.status_code, 200)
         row.refresh_from_db()
         self.assertEqual(row.skill_level, 'Advanced')
