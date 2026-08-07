@@ -195,3 +195,52 @@ class SeekerSkillNestedReadTests(APITestCase):
         r = self.client.get(f'/api/v1/seekers/dashboard/{self.seeker.id}/')
         self.assertEqual(r.status_code, 200)
         self._assert_whole_row(r.data['skills'][0])
+
+
+class SeekerSkillCreateByNameTests(APITestCase):
+    def setUp(self):
+        self.seeker = UserAccount.objects.create_user(
+            email='sbn@example.com', password='Str0ng-Password!', user_type='job_seeker')
+        refresh = RefreshToken.for_user(self.seeker)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {refresh.access_token}')
+
+    def _post(self, body):
+        return self.client.post('/api/v1/seekers/seeker-skills/', body, format='json')
+
+    def test_new_name_creates_master_skill(self):
+        r = self._post({'skill_name': 'Terraform', 'skill_level': 'Advanced'})
+        self.assertEqual(r.status_code, 201)
+        self.assertTrue(SkillSet.objects.filter(skill_name='Terraform').exists())
+
+    def test_existing_name_reused_case_insensitively(self):
+        existing = SkillSet.objects.create(skill_name='Python')
+        r = self._post({'skill_name': 'python', 'skill_level': 'Expert'})
+        self.assertEqual(r.status_code, 201)
+        self.assertEqual(SkillSet.objects.filter(skill_name__iexact='python').count(), 1)
+        self.assertEqual(SeekerSkillSet.objects.get(user_account=self.seeker).skill_set_id, existing.id)
+
+    def test_duplicate_attach_is_400_not_500(self):
+        skill = SkillSet.objects.create(skill_name='SQL')
+        SeekerSkillSet.objects.create(user_account=self.seeker, skill_set=skill, skill_level='Beginner')
+        r = self._post({'skill_name': 'SQL', 'skill_level': 'Expert'})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('already added', str(r.data['skill_set']))
+
+    def test_neither_name_nor_id_is_400(self):
+        r = self._post({'skill_level': 'Expert'})
+        self.assertEqual(r.status_code, 400)
+
+    def test_patch_level_only(self):
+        skill = SkillSet.objects.create(skill_name='Go')
+        row = SeekerSkillSet.objects.create(
+            user_account=self.seeker, skill_set=skill, skill_level='Beginner')
+        other = SkillSet.objects.create(skill_name='Rust')
+        r = self.client.patch(f'/api/v1/seekers/seeker-skills/{row.id}/',
+                              {'skill_set': str(other.id)}, format='json')
+        self.assertEqual(r.status_code, 400)
+        r = self.client.patch(f'/api/v1/seekers/seeker-skills/{row.id}/',
+                              {'skill_level': 'Advanced'}, format='json')
+        self.assertEqual(r.status_code, 200)
+        row.refresh_from_db()
+        self.assertEqual(row.skill_level, 'Advanced')
+        self.assertEqual(row.skill_set_id, skill.id)
