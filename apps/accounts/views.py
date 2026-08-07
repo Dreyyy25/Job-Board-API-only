@@ -18,7 +18,7 @@ from rest_framework.decorators import (
     permission_classes,
     throttle_classes,
 )
-from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle
+from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle, UserRateThrottle
 from rest_framework.parsers import JSONParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
@@ -89,6 +89,15 @@ class RegisterThrottle(AnonRateThrottle):
 
 
 class LoginThrottle(AnonRateThrottle):
+    scope = 'login'
+
+
+class ChangePasswordThrottle(UserRateThrottle):
+    """Keyed by authenticated user (login is anon/IP-keyed, which no-ops here).
+
+    Reuses the 'login' rate (10/min): both endpoints guard password guessing.
+    """
+
     scope = 'login'
 
 
@@ -306,13 +315,16 @@ def me(request):
 )
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
-@throttle_classes([LoginThrottle])
+@throttle_classes([ChangePasswordThrottle])
 @parser_classes([JSONParser])
 def change_password(request):
     """Verify the current password, then set the new one (JSON bodies only).
 
-    Mirrors login/register's JSON-only + LoginThrottle wiring for
-    consistency across the accounts auth endpoints.
+    Mirrors login/register's JSON-only parser wiring for consistency across
+    the accounts auth endpoints. Throttling is user-keyed (ChangePasswordThrottle)
+    rather than login's anon/IP-keyed LoginThrottle: this view is
+    IsAuthenticated-only, and AnonRateThrottle no-ops for authenticated
+    requests, so it would not actually guard against password guessing here.
     """
     current = request.data.get('current_password') or ''
     new = request.data.get('new_password') or ''
