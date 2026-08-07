@@ -89,6 +89,46 @@ class MePatchTests(APITestCase):
         self.assertEqual(r.status_code, status.HTTP_404_NOT_FOUND)
 
 
+class ChangePasswordTests(APITestCase):
+    def setUp(self):
+        self.user = UserAccount.objects.create_user(
+            email='pw@example.com', password='Old-Password-123!', user_type='job_seeker')
+        refresh = RefreshToken.for_user(self.user)
+        self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {refresh.access_token}')
+
+    def _post(self, body):
+        return self.client.post('/api/v1/accounts/change-password/', body, format='json')
+
+    def test_happy_path_204_and_new_password_works(self):
+        r = self._post({'current_password': 'Old-Password-123!', 'new_password': 'New-Password-456!'})
+        self.assertEqual(r.status_code, 204)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password('New-Password-456!'))
+
+    def test_wrong_current_password_400(self):
+        r = self._post({'current_password': 'nope', 'new_password': 'New-Password-456!'})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('current_password', r.data)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password('Old-Password-123!'))
+
+    def test_weak_new_password_400(self):
+        r = self._post({'current_password': 'Old-Password-123!', 'new_password': '123'})
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('new_password', r.data)
+
+    def test_anonymous_401(self):
+        self.client.credentials()
+        self.assertEqual(self._post({}).status_code, 401)
+
+    def test_me_patch_password_now_rejected(self):
+        r = self.client.patch('/api/v1/accounts/me/', {'password': 'Another-Pass-789!'}, format='json')
+        self.assertEqual(r.status_code, 400)
+        self.assertIn('password', r.data)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password('Old-Password-123!'))
+
+
 class CookieAuthTests(APITestCase):
     """Refresh tokens move to an httpOnly cookie; body keeps only access."""
 

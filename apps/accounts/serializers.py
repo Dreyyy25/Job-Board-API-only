@@ -54,15 +54,20 @@ class UserAccountSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(list(e.messages))
         return value
 
+    def validate(self, attrs):
+        if self.instance is not None and 'password' in self.initial_data:
+            raise serializers.ValidationError(
+                {'password': ['Use /accounts/change-password/ to change your password.']})
+        return attrs
+
     def create(self, validated_data):
         """Create user with hashed password"""
         validated_data['password'] = make_password(validated_data['password'])
         return super().create(validated_data)
 
     def update(self, instance, validated_data):
-        """Update user, hash password if provided"""
-        if 'password' in validated_data:
-            validated_data['password'] = make_password(validated_data['password'])
+        """password is create-only — validate() rejects it before this
+        point, so no update ever carries a 'password' key here."""
         return super().update(instance, validated_data)
 
 
