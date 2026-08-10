@@ -47,7 +47,7 @@ class CompanyImagesSerializer(serializers.ModelSerializer):
     class Meta:
         model = CompanyImages
         fields = ['id', 'company', 'image_url', 'created_at']
-        read_only_fields = ['id', 'created_at']
+        read_only_fields = ['id', 'company', 'created_at']
 
 
 class CompanyImagesRefSerializer(serializers.ModelSerializer):

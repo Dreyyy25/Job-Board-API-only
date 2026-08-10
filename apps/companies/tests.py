@@ -584,3 +584,63 @@ class CompanyStatusRuleTests(APITestCase):
         _auth(self.client, self.admin)
         r = self.client.patch(self.url, {"status": "active"}, format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
+
+
+class CompanyImageOwnershipTests(APITestCase):
+    def setUp(self):
+        self.owner = UserAccount.objects.create_user(
+            email="img-owner@example.com", password="Str0ng-Password!", user_type="company"
+        )
+        self.rival = UserAccount.objects.create_user(
+            email="img-rival@example.com", password="Str0ng-Password!", user_type="company"
+        )
+        self.seeker = UserAccount.objects.create_user(
+            email="img-seeker@example.com", password="Str0ng-Password!", user_type="job_seeker"
+        )
+        stream = BusinessStream.objects.create(business_stream_name="Tech")
+        for user, name in ((self.owner, "ImgCo"), (self.rival, "RivalCo")):
+            c = user.company_profile
+            c.company_name = name
+            c.business_stream = stream
+            c.save()
+        self.url = "/api/v1/companies/company-images/"
+
+    def test_company_creates_for_itself(self):
+        _auth(self.client, self.owner)
+        r = self.client.post(self.url, {"image_url": "https://cdn.example.com/a.jpg"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        img = CompanyImages.objects.get()
+        self.assertEqual(img.company, self.owner.company_profile)
+
+    def test_supplied_company_id_is_ignored(self):
+        _auth(self.client, self.rival)
+        r = self.client.post(
+            self.url,
+            {"image_url": "https://cdn.example.com/b.jpg",
+             "company": str(self.owner.company_profile.id)},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(CompanyImages.objects.get().company, self.rival.company_profile)
+
+    def test_seeker_create_403(self):
+        _auth(self.client, self.seeker)
+        r = self.client.post(self.url, {"image_url": "https://cdn.example.com/c.jpg"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_owner_deletes_own_image(self):
+        img = CompanyImages.objects.create(
+            company=self.owner.company_profile, image_url="https://cdn.example.com/d.jpg"
+        )
+        _auth(self.client, self.owner)
+        r = self.client.delete(f"{self.url}{img.id}/")
+        self.assertEqual(r.status_code, status.HTTP_204_NO_CONTENT)
+
+    def test_seeker_cannot_delete(self):
+        img = CompanyImages.objects.create(
+            company=self.owner.company_profile, image_url="https://cdn.example.com/e.jpg"
+        )
+        _auth(self.client, self.seeker)
+        r = self.client.delete(f"{self.url}{img.id}/")
+        self.assertIn(r.status_code, (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND))
+        self.assertTrue(CompanyImages.objects.filter(id=img.id).exists())

@@ -122,6 +122,15 @@ class CompanyImagesViewSet(viewsets.ModelViewSet):
             return qs.for_company_user(user)
         return qs.for_active_companies()
 
+    def perform_create(self, serializer):
+        """Images always attach to the caller's own company (B7)."""
+        from rest_framework.exceptions import PermissionDenied
+
+        user = self.request.user
+        if user.user_type != 'company':
+            raise PermissionDenied('Only company users can add images.')
+        serializer.save(company=user.company_profile)
+
 
 class PublicCompanyViewSet(viewsets.ReadOnlyModelViewSet):
     """
