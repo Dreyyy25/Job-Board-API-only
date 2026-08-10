@@ -32,9 +32,22 @@ class IsJobPosterOrAdmin(BasePermission):
         - Admins can modify any job
         - Company owners can only modify their own company's jobs
         """
-        # Read permissions for published jobs
+        # Read permissions: published jobs for everyone; drafts only for
+        # the owning company or admins (B6 — owner must be able to load a
+        # draft into the edit form).
         if request.method in SAFE_METHODS:
-            return obj.is_published
+            if obj.is_published:
+                return True
+            user = request.user
+            return bool(
+                user
+                and user.is_authenticated
+                and (
+                    user.is_staff
+                    or user.is_superuser
+                    or obj.company.user_account_id == user.id
+                )
+            )
 
         # Admins can modify anything
         if request.user.is_staff or request.user.is_superuser:
@@ -181,9 +194,22 @@ class CanManageJobSkills(BasePermission):
         - Admins can modify any skills
         - Company owners can only modify skills for their jobs
         """
-        # Read permissions for published jobs
+        # Read permissions: published jobs for everyone; drafts only for
+        # the owning company or admins (B6 — owner must be able to load a
+        # draft into the edit form).
         if request.method in SAFE_METHODS:
-            return obj.job_post.is_published
+            if obj.job_post.is_published:
+                return True
+            user = request.user
+            return bool(
+                user
+                and user.is_authenticated
+                and (
+                    user.is_staff
+                    or user.is_superuser
+                    or obj.job_post.company.user_account_id == user.id
+                )
+            )
 
         # Admins can modify anything
         if request.user.is_staff or request.user.is_superuser:

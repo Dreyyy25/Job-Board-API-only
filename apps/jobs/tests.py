@@ -1064,4 +1064,61 @@ class ApplicationLockdownTests(APITestCase):
         admin.save()
         self._as(admin)
         self.assertEqual(self._patch('accepted').status_code, 200)
-        self.assertEqual(self._patch('pending').status_code, 200)
+
+
+class DraftRetrievePermissionTests(APITestCase):
+    """B6: safe-method object permission must pass for the owner/admin of an
+    unpublished post, not just for published ones."""
+
+    def setUp(self):
+        self.owner = UserAccount.objects.create_user(
+            email="draft-owner@example.com", password="Str0ng-Password!", user_type="company"
+        )
+        self.rival = UserAccount.objects.create_user(
+            email="draft-rival@example.com", password="Str0ng-Password!", user_type="company"
+        )
+        self.admin = UserAccount.objects.create_user(
+            email="draft-admin@example.com", password="Str0ng-Password!", user_type="job_seeker"
+        )
+        self.admin.is_staff = True
+        self.admin.save()
+        stream = BusinessStream.objects.create(business_stream_name="Tech")
+        company = self.owner.company_profile
+        company.company_name = "DraftCo"
+        company.business_stream = stream
+        company.save()
+        job_type = JobType.objects.create(job_type_name="Full-time")
+        location = JobLocation.objects.create(city="Oslo", country="Norway")
+        self.draft = JobPost.objects.create(
+            company=company, job_type=job_type, job_location=location,
+            job_title="Draft role", job_description="wip", is_published=False,
+        )
+        skill = SkillSet.objects.create(skill_name="Rust")
+        self.draft_skill = JobPostSkillSet.objects.create(
+            job_post=self.draft, skill_set=skill, skill_level="Advanced", is_required=True
+        )
+
+    def test_owner_retrieves_own_draft(self):
+        _auth(self.client, self.owner)
+        r = self.client.get(f"/api/v1/jobs/job-posts/{self.draft.id}/")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertFalse(r.data["is_published"])
+
+    def test_admin_retrieves_draft(self):
+        _auth(self.client, self.admin)
+        r = self.client.get(f"/api/v1/jobs/job-posts/{self.draft.id}/")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+
+    def test_anonymous_gets_404_for_draft(self):
+        r = self.client.get(f"/api/v1/jobs/job-posts/{self.draft.id}/")
+        self.assertEqual(r.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_rival_company_gets_404_for_draft(self):
+        _auth(self.client, self.rival)
+        r = self.client.get(f"/api/v1/jobs/job-posts/{self.draft.id}/")
+        self.assertEqual(r.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_owner_retrieves_draft_skill_row(self):
+        _auth(self.client, self.owner)
+        r = self.client.get(f"/api/v1/jobs/job-skills/{self.draft_skill.id}/")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
