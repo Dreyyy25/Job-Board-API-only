@@ -1288,6 +1288,15 @@ class JobSkillWriteTests(APITestCase):
                         "skill_level": "Advanced", "is_required": True})
         self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
 
+    def test_rival_new_skill_name_403_creates_no_skillset(self):
+        _auth(self.client, self.rival)
+        r = self._post({"job_post": str(self.job.id), "skill_name": "Quantum Basketry",
+                        "skill_level": "Advanced", "is_required": True})
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertFalse(
+            SkillSet.objects.filter(skill_name__iexact="Quantum Basketry").exists()
+        )
+
     def test_patch_level_only(self):
         s = SkillSet.objects.create(skill_name="C++")
         row = JobPostSkillSet.objects.create(job_post=self.job, skill_set=s, skill_level="Beginner")

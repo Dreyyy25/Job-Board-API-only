@@ -348,16 +348,20 @@ class JobPostSkillSetSerializer(serializers.ModelSerializer):
         name = (attrs.pop('skill_name', '') or '').strip()
         if not attrs.get('skill_set') and not name:
             raise serializers.ValidationError({'skill_set': ['Provide skill_set or skill_name.']})
-        if name and not attrs.get('skill_set'):
-            existing = SkillSet.objects.filter(skill_name__iexact=name).first()
-            attrs['skill_set'] = existing or SkillSet.objects.create(skill_name=name)
 
+        # Ownership is checked before the skill_name get-or-create so a
+        # non-owner's request can't create a global SkillSet row on its way
+        # to being denied -- a rejected request must leave no side effect.
         job_post = attrs['job_post']
         user = self.context['request'].user
         if not (user.is_staff or user.is_superuser) and job_post.company.user_account_id != user.id:
             from rest_framework.exceptions import PermissionDenied
 
             raise PermissionDenied('You can only manage skills on your own job posts.')
+
+        if name and not attrs.get('skill_set'):
+            existing = SkillSet.objects.filter(skill_name__iexact=name).first()
+            attrs['skill_set'] = existing or SkillSet.objects.create(skill_name=name)
 
         if JobPostSkillSet.objects.filter(job_post=job_post, skill_set=attrs['skill_set']).exists():
             raise serializers.ValidationError(
