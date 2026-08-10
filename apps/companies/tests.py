@@ -3,7 +3,12 @@ from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
 from apps.accounts.models import UserAccount
 from apps.companies.models import BusinessStream, Company
-from apps.jobs.models import JobLocation, JobPost, JobType
+from apps.jobs.models import JobLocation, JobPost, JobType, JobPostActivity
+
+
+def _auth(client, user):
+    token = RefreshToken.for_user(user)
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {token.access_token}")
 
 
 class CompanySerializerTests(APITestCase):
@@ -465,4 +470,62 @@ class PublicCompanyQueryCountTests(APITestCase):
             len(ctx),
             COMPANY_QUERY_BUDGET,
             f"Query count {len(ctx)} exceeds budget {COMPANY_QUERY_BUDGET}",
+        )
+
+
+class CompanyDashboardStatsTests(APITestCase):
+    def setUp(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from apps.jobs.models import JobType, JobLocation, JobPost, JobPostActivity
+
+        self.owner = UserAccount.objects.create_user(
+            email="stats-owner@example.com", password="Str0ng-Password!", user_type="company"
+        )
+        self.other = UserAccount.objects.create_user(
+            email="stats-other@example.com", password="Str0ng-Password!", user_type="company"
+        )
+        seeker = UserAccount.objects.create_user(
+            email="stats-seeker@example.com", password="Str0ng-Password!", user_type="job_seeker"
+        )
+        stream = BusinessStream.objects.create(business_stream_name="Tech")
+        for user, name in ((self.owner, "StatsCo"), (self.other, "OtherCo")):
+            c = user.company_profile
+            c.company_name = name
+            c.business_stream = stream
+            c.save()
+        jt = JobType.objects.create(job_type_name="Full-time")
+        loc = JobLocation.objects.create(city="Kyoto", country="Japan")
+
+        def mk(user, title, **kw):
+            return JobPost.objects.create(
+                company=user.company_profile, job_type=jt, job_location=loc,
+                job_title=title, job_description="d", **kw,
+            )
+
+        live = mk(self.owner, "Live")
+        mk(self.owner, "Draft", is_published=False)
+        mk(self.owner, "Inactive", is_active=False)
+        rival_job = mk(self.other, "Rival live")
+
+        now = timezone.now()
+        recent = JobPostActivity.objects.create(user_account=seeker, job_post=live)
+        recent.application_date = now - timedelta(days=6)
+        recent.save()
+        seeker2 = UserAccount.objects.create_user(
+            email="stats-seeker2@example.com", password="Str0ng-Password!", user_type="job_seeker"
+        )
+        old = JobPostActivity.objects.create(user_account=seeker2, job_post=live)
+        old.application_date = now - timedelta(days=8)
+        old.save()
+        # rival application must not count for owner
+        JobPostActivity.objects.create(user_account=seeker, job_post=rival_job)
+
+    def test_stats_shape_and_math(self):
+        _auth(self.client, self.owner)
+        r = self.client.get(f"/api/v1/companies/dashboard/{self.owner.id}/")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            r.data["stats"],
+            {"active_posts": 1, "total_applications": 2, "new_this_week": 1},
         )

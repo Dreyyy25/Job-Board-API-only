@@ -25,11 +25,18 @@ from .serializers import (
 from .permissions import IsAdminOrReadOnly, IsCompanyOwnerOrAdmin, IsCompanyOwnerForImages
 
 
+class _CompanyDashboardStatsSerializer(drf_serializers.Serializer):
+    active_posts = drf_serializers.IntegerField()
+    total_applications = drf_serializers.IntegerField()
+    new_this_week = drf_serializers.IntegerField()
+
+
 _CompanyDashboardSerializer = inline_serializer(
     name='CompanyDashboard',
     fields={
         'company': CompanySerializer(),
         'images': CompanyImagesSerializer(many=True),
+        'stats': _CompanyDashboardStatsSerializer(),
     },
 )
 
