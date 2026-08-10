@@ -644,3 +644,11 @@ class CompanyImageOwnershipTests(APITestCase):
         r = self.client.delete(f"{self.url}{img.id}/")
         self.assertIn(r.status_code, (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND))
         self.assertTrue(CompanyImages.objects.filter(id=img.id).exists())
+
+    def test_deleted_company_row_returns_400(self):
+        """Company user whose Company row was deleted gets 400, not 500."""
+        _auth(self.client, self.owner)
+        Company.objects.filter(user_account=self.owner).delete()
+        r = self.client.post(self.url, {"image_url": "https://cdn.example.com/f.jpg"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(CompanyImages.objects.exists())

@@ -124,12 +124,16 @@ class CompanyImagesViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         """Images always attach to the caller's own company (B7)."""
-        from rest_framework.exceptions import PermissionDenied
+        from rest_framework.exceptions import PermissionDenied, ValidationError
 
         user = self.request.user
         if user.user_type != 'company':
             raise PermissionDenied('Only company users can add images.')
-        serializer.save(company=user.company_profile)
+        try:
+            company = Company.objects.get(user_account=user)
+            serializer.save(company=company)
+        except Company.DoesNotExist:
+            raise ValidationError('You must have a company profile before adding images.')
 
 
 class PublicCompanyViewSet(viewsets.ReadOnlyModelViewSet):
