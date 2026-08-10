@@ -1,3 +1,4 @@
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 from apps.companies.models import Company
 from apps.companies.serializers import BusinessStreamSerializer
@@ -113,8 +114,18 @@ class ApplicationJobPostSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class ApplicationApplicantSerializer(serializers.Serializer):
+    """Inline applicant identity for company screens. Email is deliberately
+    absent — companies never see seeker emails."""
+
+    id = serializers.UUIDField()
+    first_name = serializers.CharField()
+    last_name = serializers.CharField()
+
+
 class JobPostActivityReadSerializer(serializers.ModelSerializer):
     job_post = ApplicationJobPostSerializer(read_only=True)
+    applicant = serializers.SerializerMethodField()
 
     class Meta:
         model = JobPostActivity
@@ -122,12 +133,24 @@ class JobPostActivityReadSerializer(serializers.ModelSerializer):
             'id',
             'user_account',
             'job_post',
+            'applicant',
             'application_date',
             'application_status',
             'cover_letter',
             'updated_at',
         ]
         read_only_fields = fields
+
+    @extend_schema_field(ApplicationApplicantSerializer(allow_null=True))
+    def get_applicant(self, obj):
+        profile = getattr(obj.user_account, 'seeker_profile', None)
+        if profile is None:
+            return None
+        return {
+            'id': str(obj.user_account_id),
+            'first_name': profile.first_name,
+            'last_name': profile.last_name,
+        }
 
 
 def _job_post_is_owner(context, instance):

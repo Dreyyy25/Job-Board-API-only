@@ -71,6 +71,7 @@ class JobPostActivityQuerySet(models.QuerySet):
     def with_related(self):
         return self.select_related(
             'user_account',
+            'user_account__seeker_profile',
             'job_post',
             'job_post__company',
             'job_post__job_type',

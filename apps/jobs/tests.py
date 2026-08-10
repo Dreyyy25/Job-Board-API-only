@@ -923,6 +923,10 @@ class ApplicationNestedReadTests(APITestCase):
             salary_type='yearly',
         )
         self.app = JobPostActivity.objects.create(user_account=self.seeker, job_post=self.job)
+        p = self.seeker.seeker_profile
+        p.first_name = 'Ada'
+        p.last_name = 'Lovelace'
+        p.save()
         self.expected_job_post = {
             'id': str(self.job.id),
             'job_title': 'ML Engineer',
@@ -936,6 +940,11 @@ class ApplicationNestedReadTests(APITestCase):
             'is_published': True,
             'is_active': True,
         }
+        self.expected_applicant = {
+            'id': str(self.seeker.id),
+            'first_name': 'Ada',
+            'last_name': 'Lovelace',
+        }
         refresh = RefreshToken.for_user(self.seeker)
         self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {refresh.access_token}')
 
@@ -944,6 +953,7 @@ class ApplicationNestedReadTests(APITestCase):
         self.assertEqual(r.status_code, 200)
         row = r.data['results'][0]
         self.assertEqual(row['job_post'], self.expected_job_post)
+        self.assertEqual(row['applicant'], self.expected_applicant)
 
     def test_unpublished_job_still_nested_for_the_applicant(self):
         self.job.is_published = False
@@ -981,6 +991,21 @@ class ApplicationNestedReadTests(APITestCase):
         self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {refresh.access_token}')
         with self.assertNumQueries(3):  # count + page + auth user lookup
             self.client.get('/api/v1/jobs/job-applications/?page_size=50')
+
+    def test_applicant_null_when_profile_missing(self):
+        from apps.seekers.models import SeekerProfile
+        SeekerProfile.objects.filter(user_account=self.seeker).delete()
+        _auth(self.client, self.seeker)
+        r = self.client.get(f'/api/v1/jobs/job-applications/{self.app.id}/')
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertIsNone(r.data['applicant'])
+
+    def test_company_list_carries_applicant_names(self):
+        _auth(self.client, self.company_user)
+        r = self.client.get('/api/v1/jobs/job-applications/')
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        row = r.data['results'][0]
+        self.assertEqual(row['applicant']['first_name'], self.seeker.seeker_profile.first_name)
 
 
 class ApplicationLockdownTests(APITestCase):
