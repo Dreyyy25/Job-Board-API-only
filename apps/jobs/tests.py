@@ -1064,6 +1064,7 @@ class ApplicationLockdownTests(APITestCase):
         admin.save()
         self._as(admin)
         self.assertEqual(self._patch('accepted').status_code, 200)
+        self.assertEqual(self._patch('pending').status_code, 200)
 
 
 class DraftRetrievePermissionTests(APITestCase):
