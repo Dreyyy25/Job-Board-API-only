@@ -3,7 +3,7 @@ from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
 from apps.accounts.models import UserAccount
 from apps.companies.models import BusinessStream, Company
-from apps.jobs.models import JobLocation, JobPost, JobType, JobPostActivity
+from apps.jobs.models import JobLocation, JobPost, JobType
 
 
 def _auth(client, user):
