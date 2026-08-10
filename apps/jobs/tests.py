@@ -1209,3 +1209,93 @@ class CompanyPublicBoardTests(APITestCase):
     def test_anonymous_unchanged(self):
         r = self.client.get("/api/v1/jobs/job-posts/")
         self.assertEqual(self._titles(r), {"Own live", "Rival live"})
+
+
+class JobSkillWriteTests(APITestCase):
+    def setUp(self):
+        self.owner = UserAccount.objects.create_user(
+            email="skill-owner@example.com", password="Str0ng-Password!", user_type="company"
+        )
+        self.rival = UserAccount.objects.create_user(
+            email="skill-rival@example.com", password="Str0ng-Password!", user_type="company"
+        )
+        self.seeker = UserAccount.objects.create_user(
+            email="skill-seeker@example.com", password="Str0ng-Password!", user_type="job_seeker"
+        )
+        stream = BusinessStream.objects.create(business_stream_name="Tech")
+        for user, name in ((self.owner, "SkillCo"), (self.rival, "RivalCo")):
+            c = user.company_profile
+            c.company_name = name
+            c.business_stream = stream
+            c.save()
+        jt = JobType.objects.create(job_type_name="Full-time")
+        loc = JobLocation.objects.create(city="Turin", country="Italy")
+        self.job = JobPost.objects.create(
+            company=self.owner.company_profile, job_type=jt, job_location=loc,
+            job_title="Role", job_description="d",
+        )
+        self.url = "/api/v1/jobs/job-skills/"
+
+    def _post(self, body):
+        return self.client.post(self.url, body, format="json")
+
+    def test_create_by_new_skill_name(self):
+        _auth(self.client, self.owner)
+        r = self._post({"job_post": str(self.job.id), "skill_name": "Terraform",
+                        "skill_level": "Advanced", "is_required": True})
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(SkillSet.objects.filter(skill_name="Terraform").exists())
+
+    def test_create_by_name_reuses_case_insensitively(self):
+        existing = SkillSet.objects.create(skill_name="Python")
+        _auth(self.client, self.owner)
+        r = self._post({"job_post": str(self.job.id), "skill_name": "  pYtHon ",
+                        "skill_level": "Beginner", "is_required": False})
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(SkillSet.objects.filter(skill_name__iexact="python").count(), 1)
+        self.assertEqual(JobPostSkillSet.objects.get(job_post=self.job).skill_set_id, existing.id)
+
+    def test_create_by_skill_set_uuid(self):
+        s = SkillSet.objects.create(skill_name="Go")
+        _auth(self.client, self.owner)
+        r = self._post({"job_post": str(self.job.id), "skill_set": str(s.id),
+                        "skill_level": "Expert", "is_required": True})
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+
+    def test_neither_name_nor_uuid_400(self):
+        _auth(self.client, self.owner)
+        r = self._post({"job_post": str(self.job.id), "skill_level": "Expert", "is_required": True})
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_duplicate_400_with_friendly_message(self):
+        s = SkillSet.objects.create(skill_name="SQL")
+        JobPostSkillSet.objects.create(job_post=self.job, skill_set=s, skill_level="Advanced")
+        _auth(self.client, self.owner)
+        r = self._post({"job_post": str(self.job.id), "skill_name": "sql",
+                        "skill_level": "Beginner", "is_required": True})
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("already on the job post", str(r.data))
+
+    def test_rival_company_create_403(self):
+        _auth(self.client, self.rival)
+        r = self._post({"job_post": str(self.job.id), "skill_name": "Ruby",
+                        "skill_level": "Advanced", "is_required": True})
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_seeker_create_403(self):
+        _auth(self.client, self.seeker)
+        r = self._post({"job_post": str(self.job.id), "skill_name": "Ruby",
+                        "skill_level": "Advanced", "is_required": True})
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_patch_level_only(self):
+        s = SkillSet.objects.create(skill_name="C++")
+        row = JobPostSkillSet.objects.create(job_post=self.job, skill_set=s, skill_level="Beginner")
+        _auth(self.client, self.owner)
+        r = self.client.patch(f"{self.url}{row.id}/", {"skill_level": "Expert"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        r = self.client.patch(f"{self.url}{row.id}/", {"skill_name": "Rust"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        other = SkillSet.objects.create(skill_name="Zig")
+        r = self.client.patch(f"{self.url}{row.id}/", {"skill_set": str(other.id)}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)

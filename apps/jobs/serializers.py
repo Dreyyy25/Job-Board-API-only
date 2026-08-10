@@ -317,7 +317,50 @@ class JobPostActivityUpdateSerializer(serializers.ModelSerializer):
 
 
 class JobPostSkillSetSerializer(serializers.ModelSerializer):
+    """Write serializer. Create accepts either an existing skill_set UUID or a
+    free-text skill_name (case-insensitive get-or-create — mirrors the seeker
+    pattern). Create is owner-scoped; updates may change level/required only.
+
+    Meta.validators is emptied on purpose: with both unique_together fields
+    writable, DRF auto-attaches UniqueTogetherValidator, whose
+    enforce_required_fields would 400 every skill_name-only create once
+    skill_set is optional. Uniqueness is enforced manually in validate()."""
+
+    skill_name = serializers.CharField(
+        write_only=True, required=False, max_length=100, allow_blank=False
+    )
+
     class Meta:
         model = JobPostSkillSet
-        fields = ['id', 'job_post', 'skill_set', 'skill_level', 'is_required']
+        fields = ['id', 'job_post', 'skill_set', 'skill_level', 'is_required', 'skill_name']
         read_only_fields = ['id']
+        extra_kwargs = {'skill_set': {'required': False}}
+        validators = []
+
+    def validate(self, attrs):
+        if self.instance is not None:  # update: level/required only
+            if 'job_post' in attrs or 'skill_set' in attrs or 'skill_name' in attrs:
+                raise serializers.ValidationError(
+                    {'skill_set': ['Cannot change the job or skill; delete and re-add instead.']}
+                )
+            return attrs
+
+        name = (attrs.pop('skill_name', '') or '').strip()
+        if not attrs.get('skill_set') and not name:
+            raise serializers.ValidationError({'skill_set': ['Provide skill_set or skill_name.']})
+        if name and not attrs.get('skill_set'):
+            existing = SkillSet.objects.filter(skill_name__iexact=name).first()
+            attrs['skill_set'] = existing or SkillSet.objects.create(skill_name=name)
+
+        job_post = attrs['job_post']
+        user = self.context['request'].user
+        if not (user.is_staff or user.is_superuser) and job_post.company.user_account_id != user.id:
+            from rest_framework.exceptions import PermissionDenied
+
+            raise PermissionDenied('You can only manage skills on your own job posts.')
+
+        if JobPostSkillSet.objects.filter(job_post=job_post, skill_set=attrs['skill_set']).exists():
+            raise serializers.ValidationError(
+                {'skill_set': ['This skill is already on the job post.']}
+            )
+        return attrs
