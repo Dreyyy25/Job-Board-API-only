@@ -529,3 +529,58 @@ class CompanyDashboardStatsTests(APITestCase):
             r.data["stats"],
             {"active_posts": 1, "total_applications": 2, "new_this_week": 1},
         )
+
+
+class CompanyStatusRuleTests(APITestCase):
+    def setUp(self):
+        self.owner = UserAccount.objects.create_user(
+            email="status-owner@example.com", password="Str0ng-Password!", user_type="company"
+        )
+        self.admin = UserAccount.objects.create_user(
+            email="status-admin@example.com", password="Str0ng-Password!", user_type="company"
+        )
+        self.admin.is_staff = True
+        self.admin.save()
+        stream = BusinessStream.objects.create(business_stream_name="Tech")
+        self.company = self.owner.company_profile
+        self.company.company_name = "StatusCo"
+        self.company.business_stream = stream
+        self.company.save()
+        self.url = f"/api/v1/companies/profile/{self.company.id}/"
+
+    def test_owner_can_pause_and_resume(self):
+        _auth(self.client, self.owner)
+        r = self.client.patch(self.url, {"status": "inactive"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        r = self.client.patch(self.url, {"status": "active"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+
+    def test_owner_cannot_set_suspended(self):
+        _auth(self.client, self.owner)
+        r = self.client.patch(self.url, {"status": "suspended"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_suspended_owner_cannot_escape(self):
+        self.company.status = "suspended"
+        self.company.save()
+        _auth(self.client, self.owner)
+        r = self.client.patch(self.url, {"status": "active"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_suspended_same_value_and_other_fields_ok(self):
+        self.company.status = "suspended"
+        self.company.save()
+        _auth(self.client, self.owner)
+        r = self.client.patch(
+            self.url, {"status": "suspended", "profile_description": "still here"}, format="json"
+        )
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.company.refresh_from_db()
+        self.assertEqual(self.company.profile_description, "still here")
+
+    def test_admin_unrestricted(self):
+        self.company.status = "suspended"
+        self.company.save()
+        _auth(self.client, self.admin)
+        r = self.client.patch(self.url, {"status": "active"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)

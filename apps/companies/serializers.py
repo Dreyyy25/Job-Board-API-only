@@ -26,6 +26,22 @@ class CompanySerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'user_account', 'created_at', 'updated_at']
 
+    def validate_status(self, value):
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        if user is None or user.is_staff or user.is_superuser:
+            return value
+        current = self.instance.status if self.instance else None
+        if value == current:
+            return value  # no-op writes always pass (mirrors the application-status rule)
+        if current == 'suspended':
+            raise serializers.ValidationError(
+                'Your account is suspended. Contact support to restore it.'
+            )
+        if value not in ('active', 'inactive'):
+            raise serializers.ValidationError('Status may only be set to active or inactive.')
+        return value
+
 
 class CompanyImagesSerializer(serializers.ModelSerializer):
     class Meta:
