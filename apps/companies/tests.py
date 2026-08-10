@@ -6,6 +6,11 @@ from apps.companies.models import BusinessStream, Company
 from apps.jobs.models import JobLocation, JobPost, JobType
 
 
+def _auth(client, user):
+    token = RefreshToken.for_user(user)
+    client.credentials(HTTP_AUTHORIZATION=f"Bearer {token.access_token}")
+
+
 class CompanySerializerTests(APITestCase):
     def setUp(self):
         self.owner = UserAccount.objects.create_user(
@@ -466,3 +471,185 @@ class PublicCompanyQueryCountTests(APITestCase):
             COMPANY_QUERY_BUDGET,
             f"Query count {len(ctx)} exceeds budget {COMPANY_QUERY_BUDGET}",
         )
+
+
+class CompanyDashboardStatsTests(APITestCase):
+    def setUp(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from apps.jobs.models import JobType, JobLocation, JobPost, JobPostActivity
+
+        self.owner = UserAccount.objects.create_user(
+            email="stats-owner@example.com", password="Str0ng-Password!", user_type="company"
+        )
+        self.other = UserAccount.objects.create_user(
+            email="stats-other@example.com", password="Str0ng-Password!", user_type="company"
+        )
+        seeker = UserAccount.objects.create_user(
+            email="stats-seeker@example.com", password="Str0ng-Password!", user_type="job_seeker"
+        )
+        stream = BusinessStream.objects.create(business_stream_name="Tech")
+        for user, name in ((self.owner, "StatsCo"), (self.other, "OtherCo")):
+            c = user.company_profile
+            c.company_name = name
+            c.business_stream = stream
+            c.save()
+        jt = JobType.objects.create(job_type_name="Full-time")
+        loc = JobLocation.objects.create(city="Kyoto", country="Japan")
+
+        def mk(user, title, **kw):
+            return JobPost.objects.create(
+                company=user.company_profile,
+                job_type=jt,
+                job_location=loc,
+                job_title=title,
+                job_description="d",
+                **kw,
+            )
+
+        live = mk(self.owner, "Live")
+        mk(self.owner, "Draft", is_published=False)
+        mk(self.owner, "Inactive", is_active=False)
+        rival_job = mk(self.other, "Rival live")
+
+        now = timezone.now()
+        recent = JobPostActivity.objects.create(user_account=seeker, job_post=live)
+        recent.application_date = now - timedelta(days=6)
+        recent.save()
+        seeker2 = UserAccount.objects.create_user(
+            email="stats-seeker2@example.com", password="Str0ng-Password!", user_type="job_seeker"
+        )
+        old = JobPostActivity.objects.create(user_account=seeker2, job_post=live)
+        old.application_date = now - timedelta(days=8)
+        old.save()
+        # rival application must not count for owner
+        JobPostActivity.objects.create(user_account=seeker, job_post=rival_job)
+
+    def test_stats_shape_and_math(self):
+        _auth(self.client, self.owner)
+        r = self.client.get(f"/api/v1/companies/dashboard/{self.owner.id}/")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            r.data["stats"],
+            {"active_posts": 1, "total_applications": 2, "new_this_week": 1},
+        )
+
+
+class CompanyStatusRuleTests(APITestCase):
+    def setUp(self):
+        self.owner = UserAccount.objects.create_user(
+            email="status-owner@example.com", password="Str0ng-Password!", user_type="company"
+        )
+        self.admin = UserAccount.objects.create_user(
+            email="status-admin@example.com", password="Str0ng-Password!", user_type="company"
+        )
+        self.admin.is_staff = True
+        self.admin.save()
+        stream = BusinessStream.objects.create(business_stream_name="Tech")
+        self.company = self.owner.company_profile
+        self.company.company_name = "StatusCo"
+        self.company.business_stream = stream
+        self.company.save()
+        self.url = f"/api/v1/companies/profile/{self.company.id}/"
+
+    def test_owner_can_pause_and_resume(self):
+        _auth(self.client, self.owner)
+        r = self.client.patch(self.url, {"status": "inactive"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        r = self.client.patch(self.url, {"status": "active"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+
+    def test_owner_cannot_set_suspended(self):
+        _auth(self.client, self.owner)
+        r = self.client.patch(self.url, {"status": "suspended"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_suspended_owner_cannot_escape(self):
+        self.company.status = "suspended"
+        self.company.save()
+        _auth(self.client, self.owner)
+        r = self.client.patch(self.url, {"status": "active"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_suspended_same_value_and_other_fields_ok(self):
+        self.company.status = "suspended"
+        self.company.save()
+        _auth(self.client, self.owner)
+        r = self.client.patch(self.url, {"status": "suspended", "profile_description": "still here"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.company.refresh_from_db()
+        self.assertEqual(self.company.profile_description, "still here")
+
+    def test_admin_unrestricted(self):
+        self.company.status = "suspended"
+        self.company.save()
+        _auth(self.client, self.admin)
+        r = self.client.patch(self.url, {"status": "active"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+
+
+class CompanyImageOwnershipTests(APITestCase):
+    def setUp(self):
+        self.owner = UserAccount.objects.create_user(
+            email="img-owner@example.com", password="Str0ng-Password!", user_type="company"
+        )
+        self.rival = UserAccount.objects.create_user(
+            email="img-rival@example.com", password="Str0ng-Password!", user_type="company"
+        )
+        self.seeker = UserAccount.objects.create_user(
+            email="img-seeker@example.com", password="Str0ng-Password!", user_type="job_seeker"
+        )
+        stream = BusinessStream.objects.create(business_stream_name="Tech")
+        for user, name in ((self.owner, "ImgCo"), (self.rival, "RivalCo")):
+            c = user.company_profile
+            c.company_name = name
+            c.business_stream = stream
+            c.save()
+        self.url = "/api/v1/companies/company-images/"
+
+    def test_company_creates_for_itself(self):
+        _auth(self.client, self.owner)
+        r = self.client.post(self.url, {"image_url": "https://cdn.example.com/a.jpg"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        img = CompanyImages.objects.get()
+        self.assertEqual(img.company, self.owner.company_profile)
+
+    def test_supplied_company_id_is_ignored(self):
+        _auth(self.client, self.rival)
+        r = self.client.post(
+            self.url,
+            {"image_url": "https://cdn.example.com/b.jpg", "company": str(self.owner.company_profile.id)},
+            format="json",
+        )
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(CompanyImages.objects.get().company, self.rival.company_profile)
+
+    def test_seeker_create_403(self):
+        _auth(self.client, self.seeker)
+        r = self.client.post(self.url, {"image_url": "https://cdn.example.com/c.jpg"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_owner_deletes_own_image(self):
+        img = CompanyImages.objects.create(
+            company=self.owner.company_profile, image_url="https://cdn.example.com/d.jpg"
+        )
+        _auth(self.client, self.owner)
+        r = self.client.delete(f"{self.url}{img.id}/")
+        self.assertEqual(r.status_code, status.HTTP_204_NO_CONTENT)
+
+    def test_seeker_cannot_delete(self):
+        img = CompanyImages.objects.create(
+            company=self.owner.company_profile, image_url="https://cdn.example.com/e.jpg"
+        )
+        _auth(self.client, self.seeker)
+        r = self.client.delete(f"{self.url}{img.id}/")
+        self.assertIn(r.status_code, (status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND))
+        self.assertTrue(CompanyImages.objects.filter(id=img.id).exists())
+
+    def test_deleted_company_row_returns_400(self):
+        """Company user whose Company row was deleted gets 400, not 500."""
+        _auth(self.client, self.owner)
+        Company.objects.filter(user_account=self.owner).delete()
+        r = self.client.post(self.url, {"image_url": "https://cdn.example.com/f.jpg"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertFalse(CompanyImages.objects.exists())

@@ -126,13 +126,13 @@ class JobPostViewSet(viewsets.ModelViewSet):
         return JobPostSerializer
 
     def get_queryset(self):
-        """Admins → all; company → their own (published + drafts); else → published."""
+        """Admins → all; company → public board ∪ their own (drafts included); else → published."""
         qs = JobPost.objects.with_related().with_salary_rank()
         user = self.request.user
         if user.is_staff or user.is_superuser:
             return qs
         if user.is_authenticated and user.user_type == 'company':
-            return qs.for_company(user)
+            return qs.visible_to_company(user)
         return qs.published()
 
     def perform_create(self, serializer):
@@ -169,6 +169,8 @@ class JobPostActivityViewSet(viewsets.ModelViewSet):
     serializer_class = JobPostActivitySerializer
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [IsApplicantOrCompanyOrAdmin]
+    filterset_fields = ['job_post', 'application_status']
+    ordering_fields = ['application_date', 'updated_at']
     # Applications are created only through the validated /jobs/apply/ flow.
     http_method_names = ['get', 'put', 'patch', 'delete', 'head', 'options']
 

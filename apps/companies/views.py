@@ -25,11 +25,18 @@ from .serializers import (
 from .permissions import IsAdminOrReadOnly, IsCompanyOwnerOrAdmin, IsCompanyOwnerForImages
 
 
+class _CompanyDashboardStatsSerializer(drf_serializers.Serializer):
+    active_posts = drf_serializers.IntegerField()
+    total_applications = drf_serializers.IntegerField()
+    new_this_week = drf_serializers.IntegerField()
+
+
 _CompanyDashboardSerializer = inline_serializer(
     name='CompanyDashboard',
     fields={
         'company': CompanySerializer(),
         'images': CompanyImagesSerializer(many=True),
+        'stats': _CompanyDashboardStatsSerializer(),
     },
 )
 
@@ -114,6 +121,19 @@ class CompanyImagesViewSet(viewsets.ModelViewSet):
         if user.is_authenticated and user.user_type == 'company':
             return qs.for_company_user(user)
         return qs.for_active_companies()
+
+    def perform_create(self, serializer):
+        """Images always attach to the caller's own company (B7)."""
+        from rest_framework.exceptions import PermissionDenied, ValidationError
+
+        user = self.request.user
+        if user.user_type != 'company':
+            raise PermissionDenied('Only company users can add images.')
+        try:
+            company = Company.objects.get(user_account=user)
+            serializer.save(company=company)
+        except Company.DoesNotExist:
+            raise ValidationError('You must have a company profile before adding images.')
 
 
 class PublicCompanyViewSet(viewsets.ReadOnlyModelViewSet):
