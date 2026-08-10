@@ -42,11 +42,7 @@ class IsJobPosterOrAdmin(BasePermission):
             return bool(
                 user
                 and user.is_authenticated
-                and (
-                    user.is_staff
-                    or user.is_superuser
-                    or obj.company.user_account_id == user.id
-                )
+                and (user.is_staff or user.is_superuser or obj.company.user_account_id == user.id)
             )
 
         # Admins can modify anything
@@ -204,11 +200,7 @@ class CanManageJobSkills(BasePermission):
             return bool(
                 user
                 and user.is_authenticated
-                and (
-                    user.is_staff
-                    or user.is_superuser
-                    or obj.job_post.company.user_account_id == user.id
-                )
+                and (user.is_staff or user.is_superuser or obj.job_post.company.user_account_id == user.id)
             )
 
         # Admins can modify anything

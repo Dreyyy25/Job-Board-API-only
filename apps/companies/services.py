@@ -41,9 +41,7 @@ def build_company_dashboard(requester, user_id):
     stats = {
         'active_posts': company.job_posts.filter(is_published=True, is_active=True).count(),
         'total_applications': applications.count(),
-        'new_this_week': applications.filter(
-            application_date__gte=timezone.now() - timedelta(days=7)
-        ).count(),
+        'new_this_week': applications.filter(application_date__gte=timezone.now() - timedelta(days=7)).count(),
     }
 
     return {

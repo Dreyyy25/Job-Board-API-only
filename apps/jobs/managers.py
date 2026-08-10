@@ -16,10 +16,7 @@ class JobPostQuerySet(models.QuerySet):
         console's ?company= view depends on them; the public pages opt back
         into the pure public view via ?is_published=true&is_active=true.
         """
-        return self.filter(
-            models.Q(is_published=True, is_active=True)
-            | models.Q(company__user_account=user)
-        )
+        return self.filter(models.Q(is_published=True, is_active=True) | models.Q(company__user_account=user))
 
     def with_related(self):
         return self.select_related(

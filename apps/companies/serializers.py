@@ -35,9 +35,7 @@ class CompanySerializer(serializers.ModelSerializer):
         if value == current:
             return value  # no-op writes always pass (mirrors the application-status rule)
         if current == 'suspended':
-            raise serializers.ValidationError(
-                'Your account is suspended. Contact support to restore it.'
-            )
+            raise serializers.ValidationError('Your account is suspended. Contact support to restore it.')
         if value not in ('active', 'inactive'):
             raise serializers.ValidationError('Status may only be set to active or inactive.')
         return value

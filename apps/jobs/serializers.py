@@ -326,9 +326,7 @@ class JobPostSkillSetSerializer(serializers.ModelSerializer):
     enforce_required_fields would 400 every skill_name-only create once
     skill_set is optional. Uniqueness is enforced manually in validate()."""
 
-    skill_name = serializers.CharField(
-        write_only=True, required=False, max_length=100, allow_blank=False
-    )
+    skill_name = serializers.CharField(write_only=True, required=False, max_length=100, allow_blank=False)
 
     class Meta:
         model = JobPostSkillSet
@@ -364,7 +362,5 @@ class JobPostSkillSetSerializer(serializers.ModelSerializer):
             attrs['skill_set'] = existing or SkillSet.objects.create(skill_name=name)
 
         if JobPostSkillSet.objects.filter(job_post=job_post, skill_set=attrs['skill_set']).exists():
-            raise serializers.ValidationError(
-                {'skill_set': ['This skill is already on the job post.']}
-            )
+            raise serializers.ValidationError({'skill_set': ['This skill is already on the job post.']})
         return attrs

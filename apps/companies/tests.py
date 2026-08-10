@@ -499,8 +499,12 @@ class CompanyDashboardStatsTests(APITestCase):
 
         def mk(user, title, **kw):
             return JobPost.objects.create(
-                company=user.company_profile, job_type=jt, job_location=loc,
-                job_title=title, job_description="d", **kw,
+                company=user.company_profile,
+                job_type=jt,
+                job_location=loc,
+                job_title=title,
+                job_description="d",
+                **kw,
             )
 
         live = mk(self.owner, "Live")
@@ -571,9 +575,7 @@ class CompanyStatusRuleTests(APITestCase):
         self.company.status = "suspended"
         self.company.save()
         _auth(self.client, self.owner)
-        r = self.client.patch(
-            self.url, {"status": "suspended", "profile_description": "still here"}, format="json"
-        )
+        r = self.client.patch(self.url, {"status": "suspended", "profile_description": "still here"}, format="json")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
         self.company.refresh_from_db()
         self.assertEqual(self.company.profile_description, "still here")
@@ -616,8 +618,7 @@ class CompanyImageOwnershipTests(APITestCase):
         _auth(self.client, self.rival)
         r = self.client.post(
             self.url,
-            {"image_url": "https://cdn.example.com/b.jpg",
-             "company": str(self.owner.company_profile.id)},
+            {"image_url": "https://cdn.example.com/b.jpg", "company": str(self.owner.company_profile.id)},
             format="json",
         )
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)

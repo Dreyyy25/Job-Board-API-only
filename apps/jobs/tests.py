@@ -994,6 +994,7 @@ class ApplicationNestedReadTests(APITestCase):
 
     def test_applicant_null_when_profile_missing(self):
         from apps.seekers.models import SeekerProfile
+
         SeekerProfile.objects.filter(user_account=self.seeker).delete()
         _auth(self.client, self.seeker)
         r = self.client.get(f'/api/v1/jobs/job-applications/{self.app.id}/')
@@ -1116,8 +1117,12 @@ class DraftRetrievePermissionTests(APITestCase):
         job_type = JobType.objects.create(job_type_name="Full-time")
         location = JobLocation.objects.create(city="Oslo", country="Norway")
         self.draft = JobPost.objects.create(
-            company=company, job_type=job_type, job_location=location,
-            job_title="Draft role", job_description="wip", is_published=False,
+            company=company,
+            job_type=job_type,
+            job_location=location,
+            job_title="Draft role",
+            job_description="wip",
+            is_published=False,
         )
         skill = SkillSet.objects.create(skill_name="Rust")
         self.draft_skill = JobPostSkillSet.objects.create(
@@ -1172,8 +1177,12 @@ class CompanyPublicBoardTests(APITestCase):
 
         def mk(user, title, **kw):
             return JobPost.objects.create(
-                company=user.company_profile, job_type=job_type, job_location=location,
-                job_title=title, job_description="d", **kw,
+                company=user.company_profile,
+                job_type=job_type,
+                job_location=location,
+                job_title=title,
+                job_description="d",
+                **kw,
             )
 
         self.own_published = mk(self.owner, "Own live")
@@ -1196,9 +1205,7 @@ class CompanyPublicBoardTests(APITestCase):
 
     def test_company_filter_narrows_to_own_console_view(self):
         _auth(self.client, self.owner)
-        r = self.client.get(
-            f"/api/v1/jobs/job-posts/?company={self.owner.company_profile.id}"
-        )
+        r = self.client.get(f"/api/v1/jobs/job-posts/?company={self.owner.company_profile.id}")
         self.assertEqual(self._titles(r), {"Own live", "Own draft", "Own inactive"})
 
     def test_publish_filters_restore_public_view(self):
@@ -1231,8 +1238,11 @@ class JobSkillWriteTests(APITestCase):
         jt = JobType.objects.create(job_type_name="Full-time")
         loc = JobLocation.objects.create(city="Turin", country="Italy")
         self.job = JobPost.objects.create(
-            company=self.owner.company_profile, job_type=jt, job_location=loc,
-            job_title="Role", job_description="d",
+            company=self.owner.company_profile,
+            job_type=jt,
+            job_location=loc,
+            job_title="Role",
+            job_description="d",
         )
         self.url = "/api/v1/jobs/job-skills/"
 
@@ -1241,16 +1251,18 @@ class JobSkillWriteTests(APITestCase):
 
     def test_create_by_new_skill_name(self):
         _auth(self.client, self.owner)
-        r = self._post({"job_post": str(self.job.id), "skill_name": "Terraform",
-                        "skill_level": "Advanced", "is_required": True})
+        r = self._post(
+            {"job_post": str(self.job.id), "skill_name": "Terraform", "skill_level": "Advanced", "is_required": True}
+        )
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
         self.assertTrue(SkillSet.objects.filter(skill_name="Terraform").exists())
 
     def test_create_by_name_reuses_case_insensitively(self):
         existing = SkillSet.objects.create(skill_name="Python")
         _auth(self.client, self.owner)
-        r = self._post({"job_post": str(self.job.id), "skill_name": "  pYtHon ",
-                        "skill_level": "Beginner", "is_required": False})
+        r = self._post(
+            {"job_post": str(self.job.id), "skill_name": "  pYtHon ", "skill_level": "Beginner", "is_required": False}
+        )
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
         self.assertEqual(SkillSet.objects.filter(skill_name__iexact="python").count(), 1)
         self.assertEqual(JobPostSkillSet.objects.get(job_post=self.job).skill_set_id, existing.id)
@@ -1258,8 +1270,9 @@ class JobSkillWriteTests(APITestCase):
     def test_create_by_skill_set_uuid(self):
         s = SkillSet.objects.create(skill_name="Go")
         _auth(self.client, self.owner)
-        r = self._post({"job_post": str(self.job.id), "skill_set": str(s.id),
-                        "skill_level": "Expert", "is_required": True})
+        r = self._post(
+            {"job_post": str(self.job.id), "skill_set": str(s.id), "skill_level": "Expert", "is_required": True}
+        )
         self.assertEqual(r.status_code, status.HTTP_201_CREATED)
 
     def test_neither_name_nor_uuid_400(self):
@@ -1271,31 +1284,38 @@ class JobSkillWriteTests(APITestCase):
         s = SkillSet.objects.create(skill_name="SQL")
         JobPostSkillSet.objects.create(job_post=self.job, skill_set=s, skill_level="Advanced")
         _auth(self.client, self.owner)
-        r = self._post({"job_post": str(self.job.id), "skill_name": "sql",
-                        "skill_level": "Beginner", "is_required": True})
+        r = self._post(
+            {"job_post": str(self.job.id), "skill_name": "sql", "skill_level": "Beginner", "is_required": True}
+        )
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("already on the job post", str(r.data))
 
     def test_rival_company_create_403(self):
         _auth(self.client, self.rival)
-        r = self._post({"job_post": str(self.job.id), "skill_name": "Ruby",
-                        "skill_level": "Advanced", "is_required": True})
+        r = self._post(
+            {"job_post": str(self.job.id), "skill_name": "Ruby", "skill_level": "Advanced", "is_required": True}
+        )
         self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_seeker_create_403(self):
         _auth(self.client, self.seeker)
-        r = self._post({"job_post": str(self.job.id), "skill_name": "Ruby",
-                        "skill_level": "Advanced", "is_required": True})
+        r = self._post(
+            {"job_post": str(self.job.id), "skill_name": "Ruby", "skill_level": "Advanced", "is_required": True}
+        )
         self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_rival_new_skill_name_403_creates_no_skillset(self):
         _auth(self.client, self.rival)
-        r = self._post({"job_post": str(self.job.id), "skill_name": "Quantum Basketry",
-                        "skill_level": "Advanced", "is_required": True})
-        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
-        self.assertFalse(
-            SkillSet.objects.filter(skill_name__iexact="Quantum Basketry").exists()
+        r = self._post(
+            {
+                "job_post": str(self.job.id),
+                "skill_name": "Quantum Basketry",
+                "skill_level": "Advanced",
+                "is_required": True,
+            }
         )
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertFalse(SkillSet.objects.filter(skill_name__iexact="Quantum Basketry").exists())
 
     def test_patch_level_only(self):
         s = SkillSet.objects.create(skill_name="C++")
@@ -1335,9 +1355,7 @@ class ApplicationFilterTests(APITestCase):
             company=c, job_type=jt, job_location=loc, job_title="B", job_description="d"
         )
         JobPostActivity.objects.create(user_account=self.seeker, job_post=self.job_a)
-        JobPostActivity.objects.create(
-            user_account=seeker2, job_post=self.job_b, application_status="reviewed"
-        )
+        JobPostActivity.objects.create(user_account=seeker2, job_post=self.job_b, application_status="reviewed")
 
     def test_company_filters_by_job_post(self):
         _auth(self.client, self.owner)
