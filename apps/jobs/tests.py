@@ -1308,3 +1308,55 @@ class JobSkillWriteTests(APITestCase):
         other = SkillSet.objects.create(skill_name="Zig")
         r = self.client.patch(f"{self.url}{row.id}/", {"skill_set": str(other.id)}, format="json")
         self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+class ApplicationFilterTests(APITestCase):
+    def setUp(self):
+        self.owner = UserAccount.objects.create_user(
+            email="filter-owner@example.com", password="Str0ng-Password!", user_type="company"
+        )
+        self.seeker = UserAccount.objects.create_user(
+            email="filter-seeker@example.com", password="Str0ng-Password!", user_type="job_seeker"
+        )
+        seeker2 = UserAccount.objects.create_user(
+            email="filter-seeker2@example.com", password="Str0ng-Password!", user_type="job_seeker"
+        )
+        stream = BusinessStream.objects.create(business_stream_name="Tech")
+        c = self.owner.company_profile
+        c.company_name = "FilterCo"
+        c.business_stream = stream
+        c.save()
+        jt = JobType.objects.create(job_type_name="Full-time")
+        loc = JobLocation.objects.create(city="Quito", country="Ecuador")
+        self.job_a = JobPost.objects.create(
+            company=c, job_type=jt, job_location=loc, job_title="A", job_description="d"
+        )
+        self.job_b = JobPost.objects.create(
+            company=c, job_type=jt, job_location=loc, job_title="B", job_description="d"
+        )
+        JobPostActivity.objects.create(user_account=self.seeker, job_post=self.job_a)
+        JobPostActivity.objects.create(
+            user_account=seeker2, job_post=self.job_b, application_status="reviewed"
+        )
+
+    def test_company_filters_by_job_post(self):
+        _auth(self.client, self.owner)
+        r = self.client.get(f"/api/v1/jobs/job-applications/?job_post={self.job_a.id}")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(r.data["results"]), 1)
+        self.assertEqual(r.data["results"][0]["job_post"]["id"], str(self.job_a.id))
+
+    def test_company_filters_by_status(self):
+        _auth(self.client, self.owner)
+        r = self.client.get("/api/v1/jobs/job-applications/?application_status=reviewed")
+        self.assertEqual(len(r.data["results"]), 1)
+
+    def test_filters_do_not_widen_seeker_scope(self):
+        _auth(self.client, self.seeker)
+        r = self.client.get(f"/api/v1/jobs/job-applications/?job_post={self.job_b.id}")
+        self.assertEqual(len(r.data["results"]), 0)
+
+    def test_ordering_param(self):
+        _auth(self.client, self.owner)
+        r = self.client.get("/api/v1/jobs/job-applications/?ordering=application_date")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)

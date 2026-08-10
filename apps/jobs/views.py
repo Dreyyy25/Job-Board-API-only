@@ -169,6 +169,8 @@ class JobPostActivityViewSet(viewsets.ModelViewSet):
     serializer_class = JobPostActivitySerializer
     authentication_classes = [CustomJWTAuthentication]
     permission_classes = [IsApplicantOrCompanyOrAdmin]
+    filterset_fields = ['job_post', 'application_status']
+    ordering_fields = ['application_date', 'updated_at']
     # Applications are created only through the validated /jobs/apply/ flow.
     http_method_names = ['get', 'put', 'patch', 'delete', 'head', 'options']
 
