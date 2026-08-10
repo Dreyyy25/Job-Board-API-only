@@ -1123,3 +1123,64 @@ class DraftRetrievePermissionTests(APITestCase):
         _auth(self.client, self.owner)
         r = self.client.get(f"/api/v1/jobs/job-skills/{self.draft_skill.id}/")
         self.assertEqual(r.status_code, status.HTTP_200_OK)
+
+
+class CompanyPublicBoardTests(APITestCase):
+    """B8: a logged-in company browsing the list sees the whole public board
+    plus its own drafts — not only its own posts."""
+
+    def setUp(self):
+        self.owner = UserAccount.objects.create_user(
+            email="board-owner@example.com", password="Str0ng-Password!", user_type="company"
+        )
+        self.rival = UserAccount.objects.create_user(
+            email="board-rival@example.com", password="Str0ng-Password!", user_type="company"
+        )
+        stream = BusinessStream.objects.create(business_stream_name="Tech")
+        for user, name in ((self.owner, "OwnerCo"), (self.rival, "RivalCo")):
+            c = user.company_profile
+            c.company_name = name
+            c.business_stream = stream
+            c.save()
+        job_type = JobType.objects.create(job_type_name="Full-time")
+        location = JobLocation.objects.create(city="Lisbon", country="Portugal")
+
+        def mk(user, title, **kw):
+            return JobPost.objects.create(
+                company=user.company_profile, job_type=job_type, job_location=location,
+                job_title=title, job_description="d", **kw,
+            )
+
+        self.own_published = mk(self.owner, "Own live")
+        self.own_draft = mk(self.owner, "Own draft", is_published=False)
+        self.own_inactive = mk(self.owner, "Own inactive", is_active=False)
+        self.rival_published = mk(self.rival, "Rival live")
+        self.rival_draft = mk(self.rival, "Rival draft", is_published=False)
+
+    def _titles(self, response):
+        return {j["job_title"] for j in response.data["results"]}
+
+    def test_company_list_is_published_union_own(self):
+        _auth(self.client, self.owner)
+        r = self.client.get("/api/v1/jobs/job-posts/")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            self._titles(r),
+            {"Own live", "Own draft", "Own inactive", "Rival live"},
+        )
+
+    def test_company_filter_narrows_to_own_console_view(self):
+        _auth(self.client, self.owner)
+        r = self.client.get(
+            f"/api/v1/jobs/job-posts/?company={self.owner.company_profile.id}"
+        )
+        self.assertEqual(self._titles(r), {"Own live", "Own draft", "Own inactive"})
+
+    def test_publish_filters_restore_public_view(self):
+        _auth(self.client, self.owner)
+        r = self.client.get("/api/v1/jobs/job-posts/?is_published=true&is_active=true")
+        self.assertEqual(self._titles(r), {"Own live", "Rival live"})
+
+    def test_anonymous_unchanged(self):
+        r = self.client.get("/api/v1/jobs/job-posts/")
+        self.assertEqual(self._titles(r), {"Own live", "Rival live"})
