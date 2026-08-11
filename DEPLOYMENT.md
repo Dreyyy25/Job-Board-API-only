@@ -37,7 +37,7 @@ Create a **Web Service → Existing image** pointing at the pushed image.
 | `DEBUG` | `false` |
 | `ALLOWED_HOSTS` | `<app>.onrender.com` (plus any custom domain) |
 | `CSRF_TRUSTED_ORIGINS` | `https://<app>.onrender.com` (comma-separated if more) |
-| `CORS_ALLOWED_ORIGINS` | your frontend origin(s), e.g. `https://<frontend>.onrender.com` |
+| `CORS_ALLOWED_ORIGINS` | **leave unset.** The workframe-web frontend reverse-proxies `/api` same-origin, so browser CORS never applies and this API never needs to know the frontend's URL. Set only if some *other* browser client ever calls this API cross-origin directly |
 | `SECURE_PROXY_SSL_HEADER` | `HTTP_X_FORWARDED_PROTO=https` (Render terminates TLS at its proxy) |
 | `SECURE_SSL_REDIRECT` | `true` |
 | `SECURE_HSTS_SECONDS` | `31536000` |
