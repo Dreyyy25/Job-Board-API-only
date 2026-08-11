@@ -1,5 +1,9 @@
 """Service layer for the companies app."""
 
+from datetime import timedelta
+
+from django.utils import timezone
+
 from .models import Company, CompanyImages
 
 
@@ -29,10 +33,19 @@ def build_company_dashboard(requester, user_id):
         raise CompanyNotFoundError('Company not found')
 
     from .serializers import CompanyImagesSerializer, CompanySerializer
+    from apps.jobs.models import JobPostActivity
 
     images = CompanyImages.objects.filter(company=company).select_related('company')
+
+    applications = JobPostActivity.objects.filter(job_post__company=company)
+    stats = {
+        'active_posts': company.job_posts.filter(is_published=True, is_active=True).count(),
+        'total_applications': applications.count(),
+        'new_this_week': applications.filter(application_date__gte=timezone.now() - timedelta(days=7)).count(),
+    }
 
     return {
         'company': CompanySerializer(company).data,
         'images': CompanyImagesSerializer(images, many=True).data,
+        'stats': stats,
     }

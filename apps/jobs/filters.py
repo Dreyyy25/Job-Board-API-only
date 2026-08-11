@@ -19,4 +19,4 @@ class JobPostFilter(django_filters.FilterSet):
 
     class Meta:
         model = JobPost
-        fields = ["job_type", "company", "salary_type", "is_published"]
+        fields = ["job_type", "company", "salary_type", "is_published", "is_active"]

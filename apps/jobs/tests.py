@@ -923,6 +923,10 @@ class ApplicationNestedReadTests(APITestCase):
             salary_type='yearly',
         )
         self.app = JobPostActivity.objects.create(user_account=self.seeker, job_post=self.job)
+        p = self.seeker.seeker_profile
+        p.first_name = 'Ada'
+        p.last_name = 'Lovelace'
+        p.save()
         self.expected_job_post = {
             'id': str(self.job.id),
             'job_title': 'ML Engineer',
@@ -936,6 +940,11 @@ class ApplicationNestedReadTests(APITestCase):
             'is_published': True,
             'is_active': True,
         }
+        self.expected_applicant = {
+            'id': str(self.seeker.id),
+            'first_name': 'Ada',
+            'last_name': 'Lovelace',
+        }
         refresh = RefreshToken.for_user(self.seeker)
         self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {refresh.access_token}')
 
@@ -944,6 +953,7 @@ class ApplicationNestedReadTests(APITestCase):
         self.assertEqual(r.status_code, 200)
         row = r.data['results'][0]
         self.assertEqual(row['job_post'], self.expected_job_post)
+        self.assertEqual(row['applicant'], self.expected_applicant)
 
     def test_unpublished_job_still_nested_for_the_applicant(self):
         self.job.is_published = False
@@ -981,6 +991,22 @@ class ApplicationNestedReadTests(APITestCase):
         self.client.credentials(HTTP_AUTHORIZATION=f'Bearer {refresh.access_token}')
         with self.assertNumQueries(3):  # count + page + auth user lookup
             self.client.get('/api/v1/jobs/job-applications/?page_size=50')
+
+    def test_applicant_null_when_profile_missing(self):
+        from apps.seekers.models import SeekerProfile
+
+        SeekerProfile.objects.filter(user_account=self.seeker).delete()
+        _auth(self.client, self.seeker)
+        r = self.client.get(f'/api/v1/jobs/job-applications/{self.app.id}/')
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertIsNone(r.data['applicant'])
+
+    def test_company_list_carries_applicant_names(self):
+        _auth(self.client, self.company_user)
+        r = self.client.get('/api/v1/jobs/job-applications/')
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        row = r.data['results'][0]
+        self.assertEqual(row['applicant']['first_name'], self.seeker.seeker_profile.first_name)
 
 
 class ApplicationLockdownTests(APITestCase):
@@ -1065,3 +1091,296 @@ class ApplicationLockdownTests(APITestCase):
         self._as(admin)
         self.assertEqual(self._patch('accepted').status_code, 200)
         self.assertEqual(self._patch('pending').status_code, 200)
+
+
+class DraftRetrievePermissionTests(APITestCase):
+    """B6: safe-method object permission must pass for the owner/admin of an
+    unpublished post, not just for published ones."""
+
+    def setUp(self):
+        self.owner = UserAccount.objects.create_user(
+            email="draft-owner@example.com", password="Str0ng-Password!", user_type="company"
+        )
+        self.rival = UserAccount.objects.create_user(
+            email="draft-rival@example.com", password="Str0ng-Password!", user_type="company"
+        )
+        self.admin = UserAccount.objects.create_user(
+            email="draft-admin@example.com", password="Str0ng-Password!", user_type="job_seeker"
+        )
+        self.admin.is_staff = True
+        self.admin.save()
+        stream = BusinessStream.objects.create(business_stream_name="Tech")
+        company = self.owner.company_profile
+        company.company_name = "DraftCo"
+        company.business_stream = stream
+        company.save()
+        job_type = JobType.objects.create(job_type_name="Full-time")
+        location = JobLocation.objects.create(city="Oslo", country="Norway")
+        self.draft = JobPost.objects.create(
+            company=company,
+            job_type=job_type,
+            job_location=location,
+            job_title="Draft role",
+            job_description="wip",
+            is_published=False,
+        )
+        skill = SkillSet.objects.create(skill_name="Rust")
+        self.draft_skill = JobPostSkillSet.objects.create(
+            job_post=self.draft, skill_set=skill, skill_level="Advanced", is_required=True
+        )
+
+    def test_owner_retrieves_own_draft(self):
+        _auth(self.client, self.owner)
+        r = self.client.get(f"/api/v1/jobs/job-posts/{self.draft.id}/")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertFalse(r.data["is_published"])
+
+    def test_admin_retrieves_draft(self):
+        _auth(self.client, self.admin)
+        r = self.client.get(f"/api/v1/jobs/job-posts/{self.draft.id}/")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+
+    def test_anonymous_gets_404_for_draft(self):
+        r = self.client.get(f"/api/v1/jobs/job-posts/{self.draft.id}/")
+        self.assertEqual(r.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_rival_company_gets_404_for_draft(self):
+        _auth(self.client, self.rival)
+        r = self.client.get(f"/api/v1/jobs/job-posts/{self.draft.id}/")
+        self.assertEqual(r.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_owner_retrieves_draft_skill_row(self):
+        _auth(self.client, self.owner)
+        r = self.client.get(f"/api/v1/jobs/job-skills/{self.draft_skill.id}/")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+
+
+class CompanyPublicBoardTests(APITestCase):
+    """B8: a logged-in company browsing the list sees the whole public board
+    plus its own drafts — not only its own posts."""
+
+    def setUp(self):
+        self.owner = UserAccount.objects.create_user(
+            email="board-owner@example.com", password="Str0ng-Password!", user_type="company"
+        )
+        self.rival = UserAccount.objects.create_user(
+            email="board-rival@example.com", password="Str0ng-Password!", user_type="company"
+        )
+        stream = BusinessStream.objects.create(business_stream_name="Tech")
+        for user, name in ((self.owner, "OwnerCo"), (self.rival, "RivalCo")):
+            c = user.company_profile
+            c.company_name = name
+            c.business_stream = stream
+            c.save()
+        job_type = JobType.objects.create(job_type_name="Full-time")
+        location = JobLocation.objects.create(city="Lisbon", country="Portugal")
+
+        def mk(user, title, **kw):
+            return JobPost.objects.create(
+                company=user.company_profile,
+                job_type=job_type,
+                job_location=location,
+                job_title=title,
+                job_description="d",
+                **kw,
+            )
+
+        self.own_published = mk(self.owner, "Own live")
+        self.own_draft = mk(self.owner, "Own draft", is_published=False)
+        self.own_inactive = mk(self.owner, "Own inactive", is_active=False)
+        self.rival_published = mk(self.rival, "Rival live")
+        self.rival_draft = mk(self.rival, "Rival draft", is_published=False)
+
+    def _titles(self, response):
+        return {j["job_title"] for j in response.data["results"]}
+
+    def test_company_list_is_published_union_own(self):
+        _auth(self.client, self.owner)
+        r = self.client.get("/api/v1/jobs/job-posts/")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            self._titles(r),
+            {"Own live", "Own draft", "Own inactive", "Rival live"},
+        )
+
+    def test_company_filter_narrows_to_own_console_view(self):
+        _auth(self.client, self.owner)
+        r = self.client.get(f"/api/v1/jobs/job-posts/?company={self.owner.company_profile.id}")
+        self.assertEqual(self._titles(r), {"Own live", "Own draft", "Own inactive"})
+
+    def test_publish_filters_restore_public_view(self):
+        _auth(self.client, self.owner)
+        r = self.client.get("/api/v1/jobs/job-posts/?is_published=true&is_active=true")
+        self.assertEqual(self._titles(r), {"Own live", "Rival live"})
+
+    def test_anonymous_unchanged(self):
+        r = self.client.get("/api/v1/jobs/job-posts/")
+        self.assertEqual(self._titles(r), {"Own live", "Rival live"})
+
+    def test_company_filter_on_rival_returns_published_only(self):
+        _auth(self.client, self.owner)
+        r = self.client.get(f"/api/v1/jobs/job-posts/?company={self.rival.company_profile.id}")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(self._titles(r), {"Rival live"})
+
+
+class JobSkillWriteTests(APITestCase):
+    def setUp(self):
+        self.owner = UserAccount.objects.create_user(
+            email="skill-owner@example.com", password="Str0ng-Password!", user_type="company"
+        )
+        self.rival = UserAccount.objects.create_user(
+            email="skill-rival@example.com", password="Str0ng-Password!", user_type="company"
+        )
+        self.seeker = UserAccount.objects.create_user(
+            email="skill-seeker@example.com", password="Str0ng-Password!", user_type="job_seeker"
+        )
+        stream = BusinessStream.objects.create(business_stream_name="Tech")
+        for user, name in ((self.owner, "SkillCo"), (self.rival, "RivalCo")):
+            c = user.company_profile
+            c.company_name = name
+            c.business_stream = stream
+            c.save()
+        jt = JobType.objects.create(job_type_name="Full-time")
+        loc = JobLocation.objects.create(city="Turin", country="Italy")
+        self.job = JobPost.objects.create(
+            company=self.owner.company_profile,
+            job_type=jt,
+            job_location=loc,
+            job_title="Role",
+            job_description="d",
+        )
+        self.url = "/api/v1/jobs/job-skills/"
+
+    def _post(self, body):
+        return self.client.post(self.url, body, format="json")
+
+    def test_create_by_new_skill_name(self):
+        _auth(self.client, self.owner)
+        r = self._post(
+            {"job_post": str(self.job.id), "skill_name": "Terraform", "skill_level": "Advanced", "is_required": True}
+        )
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        self.assertTrue(SkillSet.objects.filter(skill_name="Terraform").exists())
+
+    def test_create_by_name_reuses_case_insensitively(self):
+        existing = SkillSet.objects.create(skill_name="Python")
+        _auth(self.client, self.owner)
+        r = self._post(
+            {"job_post": str(self.job.id), "skill_name": "  pYtHon ", "skill_level": "Beginner", "is_required": False}
+        )
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(SkillSet.objects.filter(skill_name__iexact="python").count(), 1)
+        self.assertEqual(JobPostSkillSet.objects.get(job_post=self.job).skill_set_id, existing.id)
+
+    def test_create_by_skill_set_uuid(self):
+        s = SkillSet.objects.create(skill_name="Go")
+        _auth(self.client, self.owner)
+        r = self._post(
+            {"job_post": str(self.job.id), "skill_set": str(s.id), "skill_level": "Expert", "is_required": True}
+        )
+        self.assertEqual(r.status_code, status.HTTP_201_CREATED)
+
+    def test_neither_name_nor_uuid_400(self):
+        _auth(self.client, self.owner)
+        r = self._post({"job_post": str(self.job.id), "skill_level": "Expert", "is_required": True})
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_duplicate_400_with_friendly_message(self):
+        s = SkillSet.objects.create(skill_name="SQL")
+        JobPostSkillSet.objects.create(job_post=self.job, skill_set=s, skill_level="Advanced")
+        _auth(self.client, self.owner)
+        r = self._post(
+            {"job_post": str(self.job.id), "skill_name": "sql", "skill_level": "Beginner", "is_required": True}
+        )
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("already on the job post", str(r.data))
+
+    def test_rival_company_create_403(self):
+        _auth(self.client, self.rival)
+        r = self._post(
+            {"job_post": str(self.job.id), "skill_name": "Ruby", "skill_level": "Advanced", "is_required": True}
+        )
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_seeker_create_403(self):
+        _auth(self.client, self.seeker)
+        r = self._post(
+            {"job_post": str(self.job.id), "skill_name": "Ruby", "skill_level": "Advanced", "is_required": True}
+        )
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_rival_new_skill_name_403_creates_no_skillset(self):
+        _auth(self.client, self.rival)
+        r = self._post(
+            {
+                "job_post": str(self.job.id),
+                "skill_name": "Quantum Basketry",
+                "skill_level": "Advanced",
+                "is_required": True,
+            }
+        )
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+        self.assertFalse(SkillSet.objects.filter(skill_name__iexact="Quantum Basketry").exists())
+
+    def test_patch_level_only(self):
+        s = SkillSet.objects.create(skill_name="C++")
+        row = JobPostSkillSet.objects.create(job_post=self.job, skill_set=s, skill_level="Beginner")
+        _auth(self.client, self.owner)
+        r = self.client.patch(f"{self.url}{row.id}/", {"skill_level": "Expert"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        r = self.client.patch(f"{self.url}{row.id}/", {"skill_name": "Rust"}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+        other = SkillSet.objects.create(skill_name="Zig")
+        r = self.client.patch(f"{self.url}{row.id}/", {"skill_set": str(other.id)}, format="json")
+        self.assertEqual(r.status_code, status.HTTP_400_BAD_REQUEST)
+
+
+class ApplicationFilterTests(APITestCase):
+    def setUp(self):
+        self.owner = UserAccount.objects.create_user(
+            email="filter-owner@example.com", password="Str0ng-Password!", user_type="company"
+        )
+        self.seeker = UserAccount.objects.create_user(
+            email="filter-seeker@example.com", password="Str0ng-Password!", user_type="job_seeker"
+        )
+        seeker2 = UserAccount.objects.create_user(
+            email="filter-seeker2@example.com", password="Str0ng-Password!", user_type="job_seeker"
+        )
+        stream = BusinessStream.objects.create(business_stream_name="Tech")
+        c = self.owner.company_profile
+        c.company_name = "FilterCo"
+        c.business_stream = stream
+        c.save()
+        jt = JobType.objects.create(job_type_name="Full-time")
+        loc = JobLocation.objects.create(city="Quito", country="Ecuador")
+        self.job_a = JobPost.objects.create(
+            company=c, job_type=jt, job_location=loc, job_title="A", job_description="d"
+        )
+        self.job_b = JobPost.objects.create(
+            company=c, job_type=jt, job_location=loc, job_title="B", job_description="d"
+        )
+        JobPostActivity.objects.create(user_account=self.seeker, job_post=self.job_a)
+        JobPostActivity.objects.create(user_account=seeker2, job_post=self.job_b, application_status="reviewed")
+
+    def test_company_filters_by_job_post(self):
+        _auth(self.client, self.owner)
+        r = self.client.get(f"/api/v1/jobs/job-applications/?job_post={self.job_a.id}")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(r.data["results"]), 1)
+        self.assertEqual(r.data["results"][0]["job_post"]["id"], str(self.job_a.id))
+
+    def test_company_filters_by_status(self):
+        _auth(self.client, self.owner)
+        r = self.client.get("/api/v1/jobs/job-applications/?application_status=reviewed")
+        self.assertEqual(len(r.data["results"]), 1)
+
+    def test_filters_do_not_widen_seeker_scope(self):
+        _auth(self.client, self.seeker)
+        r = self.client.get(f"/api/v1/jobs/job-applications/?job_post={self.job_b.id}")
+        self.assertEqual(len(r.data["results"]), 0)
+
+    def test_ordering_param(self):
+        _auth(self.client, self.owner)
+        r = self.client.get("/api/v1/jobs/job-applications/?ordering=application_date")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)

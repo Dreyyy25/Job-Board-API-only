@@ -9,6 +9,15 @@ class JobPostQuerySet(models.QuerySet):
     def for_company(self, user):
         return self.filter(company__user_account=user)
 
+    def visible_to_company(self, user):
+        """Public board ∪ the company's own posts (drafts included).
+
+        The own-arm deliberately carries unpublished/inactive rows — the
+        console's ?company= view depends on them; the public pages opt back
+        into the pure public view via ?is_published=true&is_active=true.
+        """
+        return self.filter(models.Q(is_published=True, is_active=True) | models.Q(company__user_account=user))
+
     def with_related(self):
         return self.select_related(
             'company',
@@ -59,6 +68,7 @@ class JobPostActivityQuerySet(models.QuerySet):
     def with_related(self):
         return self.select_related(
             'user_account',
+            'user_account__seeker_profile',
             'job_post',
             'job_post__company',
             'job_post__job_type',
