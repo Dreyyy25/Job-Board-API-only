@@ -1217,6 +1217,12 @@ class CompanyPublicBoardTests(APITestCase):
         r = self.client.get("/api/v1/jobs/job-posts/")
         self.assertEqual(self._titles(r), {"Own live", "Rival live"})
 
+    def test_company_filter_on_rival_returns_published_only(self):
+        _auth(self.client, self.owner)
+        r = self.client.get(f"/api/v1/jobs/job-posts/?company={self.rival.company_profile.id}")
+        self.assertEqual(r.status_code, status.HTTP_200_OK)
+        self.assertEqual(self._titles(r), {"Rival live"})
+
 
 class JobSkillWriteTests(APITestCase):
     def setUp(self):
