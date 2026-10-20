@@ -489,7 +489,7 @@ requires-dist = [
     { name = "langchain-google-genai", specifier = ">=4.2,<5" },
     { name = "langgraph", specifier = ">=1.2,<2" },
     { name = "langgraph-checkpoint-postgres", specifier = ">=3,<4" },
-    { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.2,<4" },
+    { name = "psycopg", extras = ["binary", "pool"], specifier = ">=3.3.4,<4" },
     { name = "psycopg2-binary", specifier = "==2.9.10" },
     { name = "pyjwt", specifier = ">=2.13.0" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
